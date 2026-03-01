@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('kiosk', {
   scanGames:         ()                          => ipcRenderer.invoke('games:scan'),
   scanPlatform:      (platform)                  => ipcRenderer.invoke('games:platform', platform),
   launchGame:        (gameId, platform)          => ipcRenderer.invoke('games:launch', gameId, platform),
+  launchPlatform:    (platform)                  => ipcRenderer.invoke('games:launchPlatform', platform),
 
   // Cafe Library
   getCafeGames:      ()                          => ipcRenderer.invoke('cafe:getGames'),

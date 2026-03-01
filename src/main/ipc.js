@@ -81,6 +81,14 @@ module.exports = function registerIpc() {
     return { ok: true }
   })
 
+  handle('games:launchPlatform', async (_, platform) => {
+    const user = db.getCurrentUser()
+    const sess = user ? db.getActiveSession(user.id) : null
+    if (!sess || sess.is_expired) return { ok: false, error: 'No active session.' }
+    await launcher.launchPlatform(platform)
+    return { ok: true }
+  })
+
   // ── Cafe Library ──────────────────────────────────────────────────────────
 
   handle('cafe:getGames',   () => db.getCafeGames())
