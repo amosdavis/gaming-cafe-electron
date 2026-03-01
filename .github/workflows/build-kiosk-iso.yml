@@ -331,49 +331,25 @@ jobs:
           echo "PXE_SIZE=${pxeSize} MB" >> $env:GITHUB_ENV
 
       # ── Azure: upload using storage account key ──────────────────────────────
-      - name: Ensure blob container exists with public read access
+      - name: Ensure blob container exists
         shell: pwsh
         env:
           AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
         run: |
-          # Use JSON parsing to avoid TSV capitalisation/whitespace comparison bugs
-          $existsJson = az storage container exists `
+          # 'az storage container create' is idempotent: returns {"created":true} for a new
+          # container and {"created":false} when it already exists — both are success (exit 0).
+          # NOTE: --public-access blob is intentionally omitted; when AllowBlobPublicAccess is
+          # disabled at the storage-account level Azure returns HTTP 409 PublicAccessNotPermitted,
+          # which the CLI maps to {"created":false} exit 0 — the container is never created.
+          $result = az storage container create `
             --account-name $env:STORAGE_ACCOUNT `
             --name $env:STORAGE_CONTAINER `
+            --auth-mode key `
             --account-key $env:AZURE_STORAGE_KEY `
             --output json | ConvertFrom-Json
-          if (-not $existsJson.exists) {
-            # Attempt to create with public blob access; fall back to private if the
-            # storage account has AllowBlobPublicAccess=false (default on new accounts).
-            az storage container create `
-              --account-name $env:STORAGE_ACCOUNT `
-              --name $env:STORAGE_CONTAINER `
-              --public-access blob `
-              --account-key $env:AZURE_STORAGE_KEY
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "Public blob access not permitted; creating private container..."
-              az storage container create `
-                --account-name $env:STORAGE_ACCOUNT `
-                --name $env:STORAGE_CONTAINER `
-                --account-key $env:AZURE_STORAGE_KEY
-              if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create container"; exit 1 }
-            }
+          if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create/verify container"; exit 1 }
+          if ($result.created) {
             Write-Host "Container '$env:STORAGE_CONTAINER' created."
-            # Poll until Azure has fully provisioned the container
-            $ready = $false
-            $retries = 0
-            do {
-              Start-Sleep -Seconds 5
-              $retries++
-              $readyJson = az storage container exists `
-                --account-name $env:STORAGE_ACCOUNT `
-                --name $env:STORAGE_CONTAINER `
-                --account-key $env:AZURE_STORAGE_KEY `
-                --output json | ConvertFrom-Json
-              $ready = $readyJson.exists
-              Write-Host "Container ready check ($retries): $ready"
-            } while (-not $ready -and $retries -lt 12)
-            if (-not $ready) { Write-Error "Container not accessible after 60s"; exit 1 }
           } else {
             Write-Host "Container '$env:STORAGE_CONTAINER' already exists."
           }
@@ -391,8 +367,10 @@ jobs:
             --container-name $env:STORAGE_CONTAINER `
             --name $blobPath `
             --file $env:ISO_FILENAME `
+            --auth-mode key `
             --account-key $env:AZURE_STORAGE_KEY `
             --overwrite
+          if ($LASTEXITCODE -ne 0) { Write-Error "ISO upload failed"; exit 1 }
           $isoUrl = "https://${env:STORAGE_ACCOUNT}.blob.core.windows.net/${env:STORAGE_CONTAINER}/${blobPath}"
           Write-Host "ISO URL: $isoUrl"
           echo "ISO_URL=$isoUrl" >> $env:GITHUB_ENV
@@ -409,8 +387,10 @@ jobs:
             --container-name $env:STORAGE_CONTAINER `
             --name $blobPath `
             --file pxe-files.zip `
+            --auth-mode key `
             --account-key $env:AZURE_STORAGE_KEY `
             --overwrite
+          if ($LASTEXITCODE -ne 0) { Write-Error "PXE upload failed"; exit 1 }
           $pxeUrl = "https://${env:STORAGE_ACCOUNT}.blob.core.windows.net/${env:STORAGE_CONTAINER}/${blobPath}"
           Write-Host "PXE URL: $pxeUrl"
           echo "PXE_URL=$pxeUrl" >> $env:GITHUB_ENV
