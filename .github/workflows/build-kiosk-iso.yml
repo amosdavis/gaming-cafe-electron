@@ -332,6 +332,19 @@ jobs:
               --public-access blob `
               --account-key $env:AZURE_STORAGE_KEY | Out-Null
             Write-Host "Container '$env:STORAGE_CONTAINER' created."
+            # Poll until Azure has fully provisioned the container (avoids race condition on first-time creation)
+            $retries = 0
+            do {
+              Start-Sleep -Seconds 5
+              $retries++
+              $ready = az storage container exists `
+                --account-name $env:STORAGE_ACCOUNT `
+                --name $env:STORAGE_CONTAINER `
+                --account-key $env:AZURE_STORAGE_KEY `
+                --query exists -o tsv
+              Write-Host "Container ready check ($retries): $ready"
+            } while ($ready -ne "true" -and $retries -lt 12)
+            if ($ready -ne "true") { Write-Error "Container not accessible after 60s"; exit 1 }
           } else {
             Write-Host "Container '$env:STORAGE_CONTAINER' already exists."
           }
