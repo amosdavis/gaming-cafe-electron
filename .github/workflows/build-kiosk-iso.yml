@@ -326,11 +326,21 @@ jobs:
             --account-key $env:AZURE_STORAGE_KEY `
             --query exists -o tsv
           if ($exists -ne "true") {
+            # Attempt to create with public blob access; fall back to private if the
+            # storage account has AllowBlobPublicAccess=false (default on new accounts).
             az storage container create `
               --account-name $env:STORAGE_ACCOUNT `
               --name $env:STORAGE_CONTAINER `
               --public-access blob `
-              --account-key $env:AZURE_STORAGE_KEY | Out-Null
+              --account-key $env:AZURE_STORAGE_KEY
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "Public blob access not permitted; creating private container..."
+              az storage container create `
+                --account-name $env:STORAGE_ACCOUNT `
+                --name $env:STORAGE_CONTAINER `
+                --account-key $env:AZURE_STORAGE_KEY
+              if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create container"; exit 1 }
+            }
             Write-Host "Container '$env:STORAGE_CONTAINER' created."
             # Poll until Azure has fully provisioned the container (avoids race condition on first-time creation)
             $retries = 0
