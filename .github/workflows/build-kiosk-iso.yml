@@ -192,7 +192,15 @@ jobs:
         run: |
           Write-Host "Mounting ISO..."
           $mount = Mount-DiskImage -ImagePath "$pwd\win11.iso" -PassThru
-          $letter = ($mount | Get-Volume).DriveLetter
+          # Poll until Windows assigns a drive letter (can take a few seconds)
+          $letter = $null
+          $retries = 0
+          do {
+            Start-Sleep -Seconds 2
+            $retries++
+            $letter = ($mount | Get-Volume).DriveLetter
+          } while (-not $letter -and $retries -lt 15)
+          if (-not $letter) { Write-Error "ISO mounted but no drive letter assigned after 30s"; exit 1 }
           Write-Host "Mounted at ${letter}:"
 
           Write-Host "Copying ISO contents to staging\..."
@@ -287,7 +295,15 @@ jobs:
         run: |
           Write-Host "Mounting built ISO to extract PXE files..."
           $mount  = Mount-DiskImage -ImagePath "$pwd\$env:ISO_FILENAME" -PassThru
-          $letter = ($mount | Get-Volume).DriveLetter
+          # Poll until Windows assigns a drive letter
+          $letter = $null
+          $retries = 0
+          do {
+            Start-Sleep -Seconds 2
+            $retries++
+            $letter = ($mount | Get-Volume).DriveLetter
+          } while (-not $letter -and $retries -lt 15)
+          if (-not $letter) { Write-Error "ISO mounted but no drive letter assigned after 30s"; exit 1 }
 
           New-Item -ItemType Directory -Path "pxe-files" -Force | Out-Null
           Copy-Item "${letter}:\sources\boot.wim"    "pxe-files\"
