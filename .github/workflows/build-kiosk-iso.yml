@@ -336,12 +336,13 @@ jobs:
         env:
           AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
         run: |
-          $exists = az storage container exists `
+          # Use JSON parsing to avoid TSV capitalisation/whitespace comparison bugs
+          $existsJson = az storage container exists `
             --account-name $env:STORAGE_ACCOUNT `
             --name $env:STORAGE_CONTAINER `
             --account-key $env:AZURE_STORAGE_KEY `
-            --query exists -o tsv
-          if ($exists -ne "true") {
+            --output json | ConvertFrom-Json
+          if (-not $existsJson.exists) {
             # Attempt to create with public blob access; fall back to private if the
             # storage account has AllowBlobPublicAccess=false (default on new accounts).
             az storage container create `
@@ -358,19 +359,21 @@ jobs:
               if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create container"; exit 1 }
             }
             Write-Host "Container '$env:STORAGE_CONTAINER' created."
-            # Poll until Azure has fully provisioned the container (avoids race condition on first-time creation)
+            # Poll until Azure has fully provisioned the container
+            $ready = $false
             $retries = 0
             do {
               Start-Sleep -Seconds 5
               $retries++
-              $ready = az storage container exists `
+              $readyJson = az storage container exists `
                 --account-name $env:STORAGE_ACCOUNT `
                 --name $env:STORAGE_CONTAINER `
                 --account-key $env:AZURE_STORAGE_KEY `
-                --query exists -o tsv
+                --output json | ConvertFrom-Json
+              $ready = $readyJson.exists
               Write-Host "Container ready check ($retries): $ready"
-            } while ($ready -ne "true" -and $retries -lt 12)
-            if ($ready -ne "true") { Write-Error "Container not accessible after 60s"; exit 1 }
+            } while (-not $ready -and $retries -lt 12)
+            if (-not $ready) { Write-Error "Container not accessible after 60s"; exit 1 }
           } else {
             Write-Host "Container '$env:STORAGE_CONTAINER' already exists."
           }
