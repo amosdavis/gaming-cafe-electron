@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gaming Cafe Kiosk — Downloads</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --border: #30363d;
+      --blue: #58a6ff;
+      --green: #3fb950;
+      --gold: #f0a04b;
+      --text: #e6edf3;
+      --muted: #8b949e;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 3rem; }
+    header h1 { font-size: 2.2rem; font-weight: 800; letter-spacing: -0.5px; }
+    header h1 span { color: var(--blue); }
+    header p { color: var(--muted); margin-top: 0.5rem; font-size: 1rem; }
+    .badge {
+      display: inline-block;
+      background: var(--blue);
+      color: #000;
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-left: 0.5rem;
+      vertical-align: middle;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .card h2 { font-size: 1.1rem; margin-bottom: 0.4rem; }
+    .card .meta { font-size: 0.8rem; color: var(--muted); margin-bottom: 1rem; }
+    .downloads { display: flex; flex-direction: column; gap: 0.75rem; }
+    .dl-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.75rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .dl-row .label { font-weight: 600; font-size: 0.95rem; }
+    .dl-row .desc  { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+    .dl-row .size  { font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0.45rem 1.1rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.8; }
+    .btn-primary { background: var(--blue); color: #000; }
+    .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .instructions {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .instructions h2 { margin-bottom: 1rem; font-size: 1.1rem; }
+    .steps { list-style: none; counter-reset: step; }
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: 0.75rem;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .steps li::before {
+      content: counter(step);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--blue);
+      color: #000;
+      font-weight: 700;
+      font-size: 0.75rem;
+      margin-top: 1px;
+    }
+    .steps li strong { color: var(--text); }
+    code {
+      background: #21262d;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.82em;
+      color: var(--gold);
+    }
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+    }
+    footer a { color: var(--blue); text-decoration: none; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>Gaming Cafe<span> Kiosk</span></h1>
+    <p>Self-installing Windows 11 kiosk image — ready to deploy</p>
+  </header>
+
+  <!-- Latest release card — populated by GitHub Actions -->
+  <div class="card">
+    <h2>Latest Release <span class="badge" id="version-badge">__VERSION__</span></h2>
+    <div class="meta">Built __BUILD_DATE__ &nbsp;·&nbsp; Windows 11 Enterprise Evaluation base</div>
+    <div class="downloads">
+
+      <div class="dl-row">
+        <div>
+          <div class="label">🖥 Kiosk ISO</div>
+          <div class="desc">Bootable Windows 11 installer with kiosk pre-configured. Write to USB with Rufus or burn to disc.</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem;">
+          <span class="size">__ISO_SIZE__</span>
+          <a class="btn btn-primary" href="__ISO_URL__">⬇ Download ISO</a>
+        </div>
+      </div>
+
+      <div class="dl-row">
+        <div>
+          <div class="label">📦 PXE Boot Files</div>
+          <div class="desc">boot.wim + iPXE config for network deployment via WDS or wimboot.</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem;">
+          <span class="size">__PXE_SIZE__</span>
+          <a class="btn btn-secondary" href="__PXE_URL__">⬇ Download</a>
+        </div>
+      </div>
+
+      <div class="dl-row">
+        <div>
+          <div class="label">📄 PXE Setup Guide</div>
+          <div class="desc">Instructions for WDS, wimboot/iPXE, and Ventoy USB fallback.</div>
+        </div>
+        <div>
+          <a class="btn btn-secondary" href="https://github.com/__REPO__/blob/main/resources/pxe-readme.md">View Guide</a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Installation instructions -->
+  <div class="instructions">
+    <h2>📋 Installation Instructions</h2>
+    <ol class="steps">
+      <li><strong>Download the ISO</strong> above and write it to a USB drive using <a href="https://rufus.ie" style="color:var(--blue)">Rufus</a> (GPT + UEFI mode) or burn it to a DVD.</li>
+      <li><strong>Set the target PC to boot from USB/DVD</strong> — enter BIOS/UEFI (<code>F2</code> / <code>Del</code>) and set USB as the first boot device, or press <code>F12</code> for the boot menu.</li>
+      <li><strong>Boot and wait</strong> — Windows Setup runs fully automatically. No prompts. The install takes approximately 15–25 minutes depending on hardware.</li>
+      <li><strong>First reboot</strong> — the kiosk setup script runs, installs the Gaming Cafe Kiosk app, hardens the OS, and sets the kiosk as the Windows shell.</li>
+      <li><strong>Done</strong> — the PC will reboot into the kiosk. Log in to the admin panel to add users and credits.</li>
+    </ol>
+  </div>
+
+  <!-- PXE quick-start -->
+  <div class="instructions">
+    <h2>🌐 PXE Quick-Start</h2>
+    <ol class="steps">
+      <li><strong>Download PXE Boot Files</strong> and extract <code>pxe-files.zip</code>.</li>
+      <li>Copy <code>boot.wim</code> to your WDS server or TFTP root.</li>
+      <li>Add <code>boot.wim</code> as a Boot Image in WDS <strong>or</strong> serve via wimboot + iPXE using the included <code>pxe-ipxe.cfg</code>.</li>
+      <li>Boot kiosk PCs from the network — installation proceeds automatically.</li>
+    </ol>
+  </div>
+
+  <footer>
+    <p>Gaming Cafe Kiosk &nbsp;·&nbsp; <a href="https://github.com/__REPO__">GitHub</a> &nbsp;·&nbsp; Version __VERSION__</p>
+  </footer>
+
+</div>
+</body>
+</html>

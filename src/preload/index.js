@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('kiosk', {
   getActiveSession:  (userId)                    => ipcRenderer.invoke('session:getActive', userId),
   endSession:        ()                          => ipcRenderer.invoke('session:end'),
   sessionHistory:    ()                          => ipcRenderer.invoke('session:history'),
+  sessionHistoryFull: ()                         => ipcRenderer.invoke('session:historyFull'),
   refreshSession:    (userId)                    => ipcRenderer.invoke('session:refresh', userId),
 
   // Credits

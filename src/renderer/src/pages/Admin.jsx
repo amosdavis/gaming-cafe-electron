@@ -13,6 +13,7 @@ export default function Admin({ user, session, onClose, onLogout }) {
   const [users,        setUsers]        = useState([])
   const [selectedUser, setSelectedUser] = useState('')
   const [creditAmt,    setCreditAmt]    = useState('1')
+  const [confirmCredit, setConfirmCredit] = useState(false)  // F-16/F-24: confirmation step
 
   // Library tab
   const [cafeGames,  setCafeGames]  = useState([])
@@ -56,13 +57,25 @@ export default function Admin({ user, session, onClose, onLogout }) {
     setHostname(window.location.hostname || 'localhost')
   }
 
-  const addCredits = async () => {
+  // F-16/F-24: show confirmation before committing credits, not direct commit
+  const requestAddCredits = () => {
     const amt = parseInt(creditAmt, 10)
     if (!selectedUser || isNaN(amt) || amt <= 0) { setError('Select a user and enter a valid amount.'); return }
+    setError('')
+    setConfirmCredit(true)
+  }
+
+  const confirmAddCredits = async () => {
+    const amt = parseInt(creditAmt, 10)
     await window.kiosk.addCredits(parseInt(selectedUser), amt, 'Admin top-up')
     setMessage(`Added ${amt} credit${amt !== 1 ? 's' : ''}!`)
-    setError('')
+    setConfirmCredit(false)
     loadData()
+  }
+
+  const cancelAddCredits = () => {
+    setConfirmCredit(false)
+    setError('')
   }
 
   const addToLibrary = async (game) => {
@@ -108,6 +121,31 @@ export default function Admin({ user, session, onClose, onLogout }) {
     const result = await window.kiosk.backupDb()
     if (result?.ok) setMessage('Database backed up successfully.')
     else setError('Backup failed.')
+  }
+
+  // F-55: export full session history as CSV
+  const exportHistoryCsv = async () => {
+    const rows = await window.kiosk.sessionHistoryFull()
+    if (!rows?.length) { setError('No session history to export.'); return }
+    const header = ['id', 'username', 'start_time', 'end_time', 'credits_used', 'duration', 'status']
+    const lines  = rows.map(s => [
+      s.id,
+      `"${(s.username ?? '').replace(/"/g, '""')}"`,
+      s.start_time ?? '',
+      s.end_time   ?? '',
+      s.credits_used,
+      s.duration_display ?? '',
+      s.status,
+    ].join(','))
+    const csv  = [header.join(','), ...lines].join('\r\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `session-history-${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    setMessage('History exported.')
   }
 
   const TABS = [
@@ -185,7 +223,20 @@ export default function Admin({ user, session, onClose, onLogout }) {
                   ))}
                 </div>
                 <input className="input-field" type="number" min="1" value={creditAmt} onChange={e => setCreditAmt(e.target.value)} placeholder="Custom amount" />
-                <button className="btn-primary" onClick={addCredits}>Add Credits</button>
+                {confirmCredit ? (
+                  <div className="flex flex-col gap-3 px-4 py-4 bg-steam-gold/10 border border-steam-gold/40 rounded-lg animate-fade-in">
+                    <p className="text-steam-gold font-semibold text-sm">
+                      Confirm: add {creditAmt} credit{parseInt(creditAmt,10) !== 1 ? 's' : ''} to{' '}
+                      <span className="text-steam-text">{users.find(u => String(u.id) === selectedUser)?.username ?? selectedUser}</span>?
+                    </p>
+                    <div className="flex gap-3">
+                      <button className="btn-primary flex-1" onClick={confirmAddCredits}>✓ Confirm</button>
+                      <button className="btn-secondary flex-1" onClick={cancelAddCredits}>✕ Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button className="btn-primary" onClick={requestAddCredits}>Add Credits</button>
+                )}
               </div>
             )}
 
@@ -313,7 +364,12 @@ export default function Admin({ user, session, onClose, onLogout }) {
             {/* History tab */}
             {tab === 'history' && (
               <div className="flex flex-col gap-2 animate-fade-in">
-                <h3 className="font-bold text-steam-text mb-2">Recent Sessions</h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-bold text-steam-text">Recent Sessions</h3>
+                  <button className="btn-secondary text-sm py-1.5 px-4" onClick={exportHistoryCsv}>
+                    ⬇ Export CSV
+                  </button>
+                </div>
                 {history.map(s => (
                   <div key={s.id} className="px-4 py-3 bg-steam-card rounded-lg text-sm">
                     <div className="flex justify-between">

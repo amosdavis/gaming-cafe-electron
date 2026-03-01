@@ -65,7 +65,8 @@ module.exports = function registerIpc() {
     db.clearCurrentUser()
     return { ok: true }
   })
-  handle('session:history', () => db.sessionHistory())
+  handle('session:history',     () => db.sessionHistory())
+  handle('session:historyFull', () => db.sessionHistory(1000))
   handle('session:refresh', (_, userId) => db.getActiveSession(userId))
 
   // ── Credits ───────────────────────────────────────────────────────────────

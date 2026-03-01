@@ -1,7 +1,11 @@
-const { app, BrowserWindow, protocol, net } = require('electron')
+const { app, BrowserWindow, protocol, net, globalShortcut } = require('electron')
 const path = require('path')
 const url  = require('url')
 const registerIpc = require('./ipc')
+const logger = require('./logger')
+
+// F-49: redirect console.* to rotating log file before anything else
+logger.init()
 
 // Prevent multiple instances in kiosk mode
 const gotLock = app.requestSingleInstanceLock()
@@ -14,7 +18,7 @@ function getMainWindow() { return mainWindow }
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    fullscreen:      true,
+    kiosk:           true,   // F-09/F-25/F-26: OS-level fullscreen kiosk; blocks Alt+Tab, Win+D, task switcher
     frame:           false,
     backgroundColor: '#0d1117',
     webPreferences: {
@@ -68,6 +72,17 @@ app.whenReady().then(() => {
 
   registerIpc()
   createWindow()
+
+  // F-09/F-25: block Task Manager and Win+D as a second layer even in kiosk mode
+  app.on('browser-window-focus', () => {
+    globalShortcut.registerAll(
+      ['Control+Shift+Escape', 'Super+D', 'Super+KeyD'],
+      () => false
+    )
+  })
+  app.on('browser-window-blur', () => {
+    globalShortcut.unregisterAll()
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

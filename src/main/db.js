@@ -16,6 +16,10 @@ function getDb() {
   _db.pragma('journal_mode = WAL')
   _db.pragma('foreign_keys = ON')
   initSchema(_db)
+
+  // F-46: scheduled backup every 30 minutes even if no session ends
+  setInterval(backupDb, 30 * 60 * 1000)
+
   return _db
 }
 

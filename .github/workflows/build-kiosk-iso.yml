@@ -1,0 +1,409 @@
+name: Build & Publish Kiosk ISO
+
+# Triggered on version tags (e.g., v1.0.0) or manually.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+# Required repository configuration (Settings → Secrets and variables → Actions):
+#
+#   Secrets:
+#     AZURE_STORAGE_KEY  — Access key for the 'isobuilds' Azure Storage Account
+#                          (Azure Portal → Storage accounts → isobuilds → Security → Access keys → key1)
+#     KIOSK_PASSWORD     — Password for the KioskAdmin Windows account baked into the image
+#
+#   Variables:
+#     WIN11_ISO_URL      — Direct download URL of Windows 11 Enterprise Evaluation ISO
+#                          Current value (Win 11 Enterprise LTSC 2024 Eval, en-us, x64):
+#                          https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_CLIENT_LTSC_EVAL_x64FRE_en-us.iso
+
+env:
+  STORAGE_ACCOUNT: isobuilds
+  STORAGE_CONTAINER: kiosk-releases
+  # Resolved kiosk exe path after NSIS install (electron-builder default)
+  KIOSK_EXE_PATH: 'C:\Program Files\Gaming Cafe Kiosk\Gaming Cafe Kiosk.exe'
+
+jobs:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 1: Build the Electron NSIS installer
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-app:
+    name: Build Electron Kiosk Installer
+    runs-on: windows-latest
+    outputs:
+      installer-name: ${{ steps.find-installer.outputs.name }}
+      version: ${{ steps.version.outputs.value }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version label
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $v = "${{ github.event.inputs.version }}"
+          } else {
+            $v = "${{ github.ref_name }}"
+          }
+          echo "value=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $v"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Electron app and NSIS installer
+        run: npm run dist
+        env:
+          # electron-builder reads this for the installer version
+          npm_package_version: ${{ steps.version.outputs.value }}
+
+      - name: Find installer file
+        id: find-installer
+        shell: pwsh
+        run: |
+          $f = Get-ChildItem dist -Filter "*.exe" | Select-Object -First 1
+          if (-not $f) { Write-Error "No .exe found in dist/"; exit 1 }
+          Write-Host "Installer: $($f.Name)"
+          echo "name=$($f.Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiosk-installer
+          path: dist/${{ steps.find-installer.outputs.name }}
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 2: Build the Windows 11 kiosk ISO
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-iso:
+    name: Build Windows 11 Kiosk ISO
+    runs-on: windows-latest
+    needs: build-app
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Disk space: free ~14 GB by removing unused toolchains ───────────────
+      - name: Free runner disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Check available disk space
+        shell: pwsh
+        run: |
+          $d = Get-PSDrive C
+          Write-Host "Free space: $([math]::Round($d.Free/1GB, 1)) GB"
+
+      # ── Download kiosk NSIS installer ────────────────────────────────────────
+      - name: Download kiosk installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kiosk-installer
+          path: artifacts/
+
+      - name: Rename installer to known filename
+        shell: pwsh
+        run: |
+          $src = Get-ChildItem artifacts -Filter "*.exe" | Select-Object -First 1
+          Copy-Item $src.FullName "artifacts\GamingCafeKiosk-Setup.exe"
+          Write-Host "Installer ready: artifacts\GamingCafeKiosk-Setup.exe"
+
+      # ── Install Windows ADK (Deployment Tools only — provides oscdimg.exe) ──
+      - name: Download Windows ADK installer
+        shell: pwsh
+        run: |
+          Write-Host "Downloading Windows ADK..."
+          $url = "https://go.microsoft.com/fwlink/?linkid=2271337"
+          Invoke-WebRequest -Uri $url -OutFile "adk-setup.exe" -UseBasicParsing
+          Write-Host "ADK installer downloaded."
+
+      - name: Install Windows ADK (Deployment Tools feature only)
+        shell: cmd
+        run: |
+          adk-setup.exe /quiet /norestart /features OptionId.DeploymentTools
+          if %errorlevel% neq 0 (
+            echo ADK install returned %errorlevel% -- checking if oscdimg is available
+          )
+          :: Give installer time to complete
+          timeout /t 30
+
+      - name: Verify oscdimg.exe is available
+        shell: pwsh
+        run: |
+          $oscdimg = "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe"
+          if (-not (Test-Path $oscdimg)) {
+            # Also search common alternate paths
+            $alt = Get-ChildItem "C:\Program Files*\Windows Kits" -Recurse -Filter "oscdimg.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($alt) { $oscdimg = $alt.FullName }
+            else { Write-Error "oscdimg.exe not found. ADK install may have failed."; exit 1 }
+          }
+          Write-Host "oscdimg: $oscdimg"
+          echo "OSCDIMG=$oscdimg" >> $env:GITHUB_ENV
+
+      # ── Download Windows 11 ISO ───────────────────────────────────────────────
+      - name: Download Windows 11 Enterprise Evaluation ISO
+        shell: pwsh
+        run: |
+          $url = "${{ vars.WIN11_ISO_URL }}"
+          if (-not $url) { Write-Error "WIN11_ISO_URL repository variable is not set."; exit 1 }
+          Write-Host "Downloading Windows 11 ISO..."
+          # Use BITS for large file download with progress
+          Start-BitsTransfer -Source $url -Destination "win11.iso"
+          $size = [math]::Round((Get-Item "win11.iso").Length / 1GB, 2)
+          Write-Host "ISO downloaded: ${size} GB"
+
+      # ── Mount ISO and copy contents to staging directory ─────────────────────
+      - name: Mount ISO and copy to staging
+        shell: pwsh
+        run: |
+          Write-Host "Mounting ISO..."
+          $mount = Mount-DiskImage -ImagePath "$pwd\win11.iso" -PassThru
+          $letter = ($mount | Get-Volume).DriveLetter
+          Write-Host "Mounted at ${letter}:"
+
+          Write-Host "Copying ISO contents to staging\..."
+          New-Item -ItemType Directory -Path "staging" -Force | Out-Null
+          robocopy "${letter}:\" staging /E /NFL /NDL /NJH /NJS /NC /NS
+          # robocopy exit codes 0-7 are success; > 7 are errors
+          if ($LASTEXITCODE -gt 7) {
+            Write-Error "robocopy failed: $LASTEXITCODE"
+            exit 1
+          }
+
+          Dismount-DiskImage -ImagePath "$pwd\win11.iso" | Out-Null
+          Write-Host "ISO staged. Deleting source ISO to free disk space."
+          Remove-Item "win11.iso" -Force
+          Write-Host "Staging complete."
+
+      # ── Inject kiosk files into the ISO staging tree ─────────────────────────
+      - name: Inject autounattend.xml
+        shell: pwsh
+        run: |
+          # Substitute password placeholder in autounattend.xml
+          $xml = Get-Content "resources\autounattend.xml" -Raw
+          $xml = $xml -replace '__KIOSK_PASSWORD__', '${{ secrets.KIOSK_PASSWORD }}'
+          Set-Content "staging\autounattend.xml" -Value $xml -Encoding UTF8
+          Write-Host "autounattend.xml injected."
+
+      - name: Inject OEM files ($OEM$ structure)
+        shell: pwsh
+        run: |
+          # $OEM$\$$\Setup\Scripts\SetupComplete.cmd
+          #   → C:\Windows\Setup\Scripts\SetupComplete.cmd on the installed OS
+          $scriptsDir = "staging\`$OEM`$\`$`$\Setup\Scripts"
+          New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
+          Copy-Item "resources\oem\setup-complete.cmd" "$scriptsDir\SetupComplete.cmd"
+
+          # $OEM$\$1\KioskSetup\  →  C:\KioskSetup\ on the installed OS
+          $kioskSetupDir = "staging\`$OEM`$\`$1\KioskSetup"
+          New-Item -ItemType Directory -Path $kioskSetupDir -Force | Out-Null
+          Copy-Item "artifacts\GamingCafeKiosk-Setup.exe" "$kioskSetupDir\"
+          Copy-Item "resources\windows-lockdown.ps1"      "$kioskSetupDir\"
+
+          Write-Host "OEM files injected."
+
+      # ── Rebuild the bootable ISO ─────────────────────────────────────────────
+      - name: Rebuild bootable ISO with oscdimg
+        shell: pwsh
+        run: |
+          $version = "${{ needs.build-app.outputs.version }}"
+          $isoOut  = "GamingCafeKiosk-${version}.iso"
+
+          # Boot sector files from the original ISO staging tree
+          $etfsboot    = "staging\boot\etfsboot.com"           # BIOS boot
+          $efisys      = "staging\efi\microsoft\boot\efisys.noprompt" # UEFI boot (no prompt version)
+          if (-not (Test-Path $efisys)) {
+            $efisys    = "staging\efi\microsoft\boot\efisys.bin"
+          }
+
+          Write-Host "Building ISO: $isoOut"
+          Write-Host "BIOS boot sector: $etfsboot"
+          Write-Host "UEFI boot sector: $efisys"
+
+          # oscdimg flags:
+          #   -m        ignore maximum image size
+          #   -o        optimise storage (single instance)
+          #   -u2       use UDF 2.01 file system
+          #   -udfver102 UDF 1.02 compatibility
+          #   -bootdata: dual boot (BIOS + UEFI)
+          & "$env:OSCDIMG" `
+            -m -o -u2 -udfver102 `
+            "-bootdata:2#p0,e,b${etfsboot}#pEF,e,b${efisys}" `
+            staging `
+            $isoOut
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "oscdimg failed with exit code $LASTEXITCODE"
+            exit 1
+          }
+          $size = [math]::Round((Get-Item $isoOut).Length / 1GB, 2)
+          Write-Host "ISO built: $isoOut (${size} GB)"
+          echo "ISO_FILENAME=$isoOut" >> $env:GITHUB_ENV
+          echo "ISO_SIZE=${size} GB"  >> $env:GITHUB_ENV
+
+          # Free staging dir to reclaim disk space
+          Remove-Item staging -Recurse -Force
+          Write-Host "Staging cleaned."
+
+      # ── Extract PXE boot files ────────────────────────────────────────────────
+      - name: Extract PXE boot files
+        shell: pwsh
+        run: |
+          Write-Host "Mounting built ISO to extract PXE files..."
+          $mount  = Mount-DiskImage -ImagePath "$pwd\$env:ISO_FILENAME" -PassThru
+          $letter = ($mount | Get-Volume).DriveLetter
+
+          New-Item -ItemType Directory -Path "pxe-files" -Force | Out-Null
+          Copy-Item "${letter}:\sources\boot.wim"    "pxe-files\"
+          Copy-Item "resources\pxe-readme.md"        "pxe-files\README.md"
+
+          # Generate a sample iPXE config with the blob base URL
+          $version  = "${{ needs.build-app.outputs.version }}"
+          $blobBase = "https://$env:STORAGE_ACCOUNT.blob.core.windows.net/$env:STORAGE_CONTAINER/${version}"
+          $ipxe = @"
+          #!ipxe
+          dhcp
+          kernel tftp://`${next-server}/wimboot
+          initrd tftp://`${next-server}/boot.wim        boot.wim
+          # Alternatively, serve boot.wim directly from Azure:
+          # kernel $blobBase/boot.wim
+          boot
+          "@
+          Set-Content "pxe-files\pxe-ipxe.cfg" -Value $ipxe.Trim()
+
+          Dismount-DiskImage -ImagePath "$pwd\$env:ISO_FILENAME" | Out-Null
+
+          Compress-Archive -Path "pxe-files\*" -DestinationPath "pxe-files.zip"
+          $pxeSize = [math]::Round((Get-Item "pxe-files.zip").Length / 1MB, 1)
+          Write-Host "pxe-files.zip created (${pxeSize} MB)"
+          echo "PXE_SIZE=${pxeSize} MB" >> $env:GITHUB_ENV
+
+      # ── Azure: upload using storage account key ──────────────────────────────
+      - name: Ensure blob container exists with public read access
+        shell: pwsh
+        env:
+          AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
+        run: |
+          $exists = az storage container exists `
+            --account-name $env:STORAGE_ACCOUNT `
+            --name $env:STORAGE_CONTAINER `
+            --account-key $env:AZURE_STORAGE_KEY `
+            --query exists -o tsv
+          if ($exists -ne "true") {
+            az storage container create `
+              --account-name $env:STORAGE_ACCOUNT `
+              --name $env:STORAGE_CONTAINER `
+              --public-access blob `
+              --account-key $env:AZURE_STORAGE_KEY | Out-Null
+            Write-Host "Container '$env:STORAGE_CONTAINER' created."
+          } else {
+            Write-Host "Container '$env:STORAGE_CONTAINER' already exists."
+          }
+
+      - name: Upload ISO to Azure Blob Storage
+        shell: pwsh
+        env:
+          AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
+        run: |
+          $version  = "${{ needs.build-app.outputs.version }}"
+          $blobPath = "${version}/$env:ISO_FILENAME"
+          Write-Host "Uploading ISO to blob: $blobPath"
+          az storage blob upload `
+            --account-name $env:STORAGE_ACCOUNT `
+            --container-name $env:STORAGE_CONTAINER `
+            --name $blobPath `
+            --file $env:ISO_FILENAME `
+            --account-key $env:AZURE_STORAGE_KEY `
+            --overwrite
+          $isoUrl = "https://${env:STORAGE_ACCOUNT}.blob.core.windows.net/${env:STORAGE_CONTAINER}/${blobPath}"
+          Write-Host "ISO URL: $isoUrl"
+          echo "ISO_URL=$isoUrl" >> $env:GITHUB_ENV
+
+      - name: Upload PXE files to Azure Blob Storage
+        shell: pwsh
+        env:
+          AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
+        run: |
+          $version  = "${{ needs.build-app.outputs.version }}"
+          $blobPath = "${version}/pxe-files.zip"
+          az storage blob upload `
+            --account-name $env:STORAGE_ACCOUNT `
+            --container-name $env:STORAGE_CONTAINER `
+            --name $blobPath `
+            --file pxe-files.zip `
+            --account-key $env:AZURE_STORAGE_KEY `
+            --overwrite
+          $pxeUrl = "https://${env:STORAGE_ACCOUNT}.blob.core.windows.net/${env:STORAGE_CONTAINER}/${blobPath}"
+          Write-Host "PXE URL: $pxeUrl"
+          echo "PXE_URL=$pxeUrl" >> $env:GITHUB_ENV
+
+      # ── Generate and deploy GitHub Pages ─────────────────────────────────────
+      - name: Generate GitHub Pages index.html
+        shell: pwsh
+        run: |
+          $version   = "${{ needs.build-app.outputs.version }}"
+          $buildDate = (Get-Date -Format "yyyy-MM-dd HH:mm UTC")
+          $repo      = "${{ github.repository }}"
+
+          $html = Get-Content "docs\index.html" -Raw
+          $html = $html -replace '__VERSION__',    $version
+          $html = $html -replace '__BUILD_DATE__', $buildDate
+          $html = $html -replace '__ISO_URL__',    $env:ISO_URL
+          $html = $html -replace '__ISO_SIZE__',   $env:ISO_SIZE
+          $html = $html -replace '__PXE_URL__',    $env:PXE_URL
+          $html = $html -replace '__PXE_SIZE__',   $env:PXE_SIZE
+          $html = $html -replace '__REPO__',       $repo
+
+          # Write to a deploy directory so only docs are pushed to gh-pages
+          New-Item -ItemType Directory -Path "gh-pages-deploy" -Force | Out-Null
+          Set-Content "gh-pages-deploy\index.html" -Value $html -Encoding UTF8
+          Write-Host "GitHub Pages HTML generated."
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: gh-pages-deploy
+          publish_branch: gh-pages
+          commit_message: "Release ${{ needs.build-app.outputs.version }} — update download page"
+          force_orphan: true
+
+      # ── Summary ──────────────────────────────────────────────────────────────
+      - name: Print build summary
+        shell: pwsh
+        run: |
+          $version = "${{ needs.build-app.outputs.version }}"
+          $repo    = "${{ github.repository }}"
+          Write-Host ""
+          Write-Host "╔══════════════════════════════════════════════════════╗"
+          Write-Host "  Gaming Cafe Kiosk ISO Build Complete — $version"
+          Write-Host "╠══════════════════════════════════════════════════════╣"
+          Write-Host "  ISO        : $env:ISO_URL"
+          Write-Host "  PXE files  : $env:PXE_URL"
+          Write-Host "  Downloads  : https://$repo.github.io/gaming-cafe-electron/"
+          Write-Host "╚══════════════════════════════════════════════════════╝"
