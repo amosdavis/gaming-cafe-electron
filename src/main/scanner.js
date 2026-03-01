@@ -20,6 +20,10 @@ function scanSteam() {
         const installDir = _acfValue(acf, 'installdir')
         if (!id || !name) continue
 
+        const stateFlags = parseInt(_acfValue(acf, 'StateFlags') ?? '0', 10)
+        // Only include fully-installed games (bit 2 set = 4). Skip games still downloading.
+        if ((stateFlags & 4) !== 4) continue
+
         games.push({
           id:       id,
           name:     name,

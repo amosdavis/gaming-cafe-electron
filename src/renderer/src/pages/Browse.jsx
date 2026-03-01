@@ -8,6 +8,7 @@ export default function Browse({ user, session, onLogout, navigate, platform }) 
   const [busy,   setBusy]   = useState(true)
   const [error,  setError]  = useState('')
   const [launching, setLaunching] = useState(null)
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     setBusy(true)
@@ -58,6 +59,19 @@ export default function Browse({ user, session, onLogout, navigate, platform }) 
         )}
       </div>
 
+      {/* Search bar */}
+      {!busy && games.length > 0 && (
+        <div className="px-6 pt-4 shrink-0">
+          <input
+            className="input-field w-full"
+            placeholder={`Search ${label} games…`}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
+      )}
+
       {/* Game list */}
       <div className="flex-1 overflow-y-auto px-6 py-4 animate-fade-in">
         {busy && (
@@ -78,25 +92,34 @@ export default function Browse({ user, session, onLogout, navigate, platform }) 
           </div>
         )}
 
-        {!busy && games.map(game => (
-          <div
-            key={game.id}
-            className={`game-row ${launching === game.id ? 'opacity-60 pointer-events-none' : ''}`}
-            onClick={() => launch(game)}
-          >
-            <div className="w-10 h-10 rounded bg-steam-card border border-steam-border flex items-center justify-center text-steam-muted text-lg shrink-0">
-              🎮
+        {!busy && (() => {
+          const filtered = search.trim()
+            ? games.filter(g => g.name.toLowerCase().includes(search.toLowerCase()))
+            : games
+          return filtered.length === 0 && search.trim() ? (
+            <div className="flex flex-col items-center justify-center h-32 gap-2 text-steam-muted">
+              <p>No games matching <span className="text-steam-text">"{search}"</span></p>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-steam-text truncate">{game.name}</p>
-              <p className="text-xs text-steam-muted">{label}</p>
+          ) : filtered.map(game => (
+            <div
+              key={game.id}
+              className={`game-row ${launching === game.id ? 'opacity-60 pointer-events-none' : ''}`}
+              onClick={() => launch(game)}
+            >
+              <div className="w-10 h-10 rounded bg-steam-card border border-steam-border flex items-center justify-center text-steam-muted text-lg shrink-0">
+                🎮
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-steam-text truncate">{game.name}</p>
+                <p className="text-xs text-steam-muted">{label}</p>
+              </div>
+              {launching === game.id
+                ? <span className="text-steam-muted text-sm animate-pulse">Launching…</span>
+                : <span className="text-steam-blue text-sm opacity-0 group-hover:opacity-100">▶ Play</span>
+              }
             </div>
-            {launching === game.id
-              ? <span className="text-steam-muted text-sm animate-pulse">Launching…</span>
-              : <span className="text-steam-blue text-sm opacity-0 group-hover:opacity-100">▶ Play</span>
-            }
-          </div>
-        ))}
+          ))
+        })()}
       </div>
     </div>
   )

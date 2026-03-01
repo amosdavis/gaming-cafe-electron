@@ -83,7 +83,28 @@ function initSchema(db) {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS login_attempts (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      username     TEXT NOT NULL COLLATE NOCASE,
+      attempted_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS featured_games (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      game_id  TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      added_at TEXT NOT NULL,
+      UNIQUE(game_id, platform)
+    );
   `)
+
+  // F-58: Age restriction columns (idempotent via try/catch)
+  ;[
+    "ALTER TABLE users ADD COLUMN under_18 INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE cafe_games ADD COLUMN age_rating TEXT NOT NULL DEFAULT 'E'",
+  ].forEach(sql => { try { db.prepare(sql).run() } catch { /* already exists */ } })
 
   // Seed default admin PIN if not set (SHA-256 of "1234")
   const existing = db.prepare("SELECT value FROM settings WHERE key='admin_pin_hash'").get()
@@ -94,17 +115,48 @@ function initSchema(db) {
   }
 }
 
-const utcnow = () => new Date().toISOString().slice(0, 19)
+const utcnow = () => new Date().toISOString()
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
 function login(username, pin) {
   const db   = getDb()
+  const lock = checkLoginLock(username)
+  if (lock.locked) return { locked: true, retry_after_secs: lock.retry_after_secs }
+
   const hash = crypto.createHash('sha256').update(pin).digest('hex')
   const user = db.prepare(
     'SELECT id, username, display_name FROM users WHERE username=? COLLATE NOCASE AND pin_hash=? AND active=1'
   ).get(username, hash)
-  return user ?? null
+
+  if (!user) {
+    recordLoginAttempt(username)
+    return null
+  }
+  // Clear attempts on success
+  db.prepare('DELETE FROM login_attempts WHERE username=?').run(username)
+  return user
+}
+
+function recordLoginAttempt(username) {
+  getDb().prepare('INSERT INTO login_attempts (username, attempted_at) VALUES (?,?)').run(username, utcnow())
+}
+
+function checkLoginLock(username) {
+  const db = getDb()
+  const windowMs = 10 * 60 * 1000  // 10 minutes
+  const cutoff   = new Date(Date.now() - windowMs).toISOString()
+  const count = db.prepare(
+    'SELECT COUNT(*) as c FROM login_attempts WHERE username=? AND attempted_at > ?'
+  ).get(username, cutoff)?.c ?? 0
+  if (count < 5) return { locked: false, attempts: count }
+  // Find oldest attempt in window to compute unlock time
+  const oldest = db.prepare(
+    'SELECT attempted_at FROM login_attempts WHERE username=? AND attempted_at > ? ORDER BY attempted_at ASC LIMIT 1'
+  ).get(username, cutoff)
+  const unlockAt = new Date(new Date(oldest.attempted_at).getTime() + windowMs)
+  const retrySecs = Math.max(0, Math.ceil((unlockAt - Date.now()) / 1000))
+  return { locked: true, retry_after_secs: retrySecs }
 }
 
 function createUser(username, pin, displayName = '') {
@@ -176,7 +228,7 @@ function getActiveSession(userId) {
 function enrichSession(raw) {
   const mpc        = MINUTES_PER_CREDIT()
   const totalSecs  = raw.credits_used * mpc * 60
-  const startMs    = new Date(raw.start_time + 'Z').getTime()
+  const startMs    = new Date(raw.start_time).getTime()
   const elapsedSec = Math.floor((Date.now() - startMs) / 1000)
   const remSec     = Math.max(0, totalSecs - elapsedSec)
 
@@ -222,9 +274,21 @@ function endSession(sessionId) {
   const now = utcnow()
   const s   = db.prepare('SELECT * FROM sessions WHERE id=?').get(sessionId)
   if (!s) return
-  const startMs = new Date(s.start_time + 'Z').getTime()
+  const startMs = new Date(s.start_time).getTime()
   const secs    = Math.floor((Date.now() - startMs) / 1000)
   db.prepare("UPDATE sessions SET status='ended', end_time=?, total_seconds=? WHERE id=?").run(now, secs, sessionId)
+  backupDb()
+}
+
+function backupDb() {
+  try {
+    const b1 = DB_PATH + '.bak'
+    const b2 = DB_PATH + '.bak2'
+    const b3 = DB_PATH + '.bak3'
+    if (fs.existsSync(b2)) fs.copyFileSync(b2, b3)
+    if (fs.existsSync(b1)) fs.copyFileSync(b1, b2)
+    fs.copyFileSync(DB_PATH, b1)
+  } catch { /* best-effort */ }
 }
 
 function sessionHistory(limit = 20) {
@@ -259,6 +323,25 @@ function removeCafeGame(gameId, platform) {
   getDb().prepare('DELETE FROM cafe_games WHERE game_id=? AND platform=?').run(gameId, platform)
 }
 
+function getFeaturedGames() {
+  return getDb().prepare(
+    'SELECT game_id, platform, position FROM featured_games ORDER BY position ASC'
+  ).all()
+}
+
+function setFeaturedGame(gameId, platform, position) {
+  try {
+    getDb().prepare(
+      'INSERT OR REPLACE INTO featured_games (game_id,platform,position,added_at) VALUES (?,?,?,?)'
+    ).run(gameId, platform, position, utcnow())
+    return true
+  } catch { return false }
+}
+
+function removeFeaturedGame(gameId, platform) {
+  getDb().prepare('DELETE FROM featured_games WHERE game_id=? AND platform=?').run(gameId, platform)
+}
+
 // ── Admin ────────────────────────────────────────────────────────────────────
 
 function verifyAdmin(pin) {
@@ -267,6 +350,18 @@ function verifyAdmin(pin) {
   if (!row) return false
   const hash = crypto.createHash('sha256').update(pin).digest('hex')
   return hash === row.value
+}
+
+function setUserAgeRestriction(userId, under18) {
+  getDb().prepare('UPDATE users SET under_18=? WHERE id=?').run(under18 ? 1 : 0, userId)
+}
+
+function setCafeGameRating(gameId, platform, rating) {
+  getDb().prepare("UPDATE cafe_games SET age_rating=? WHERE game_id=? AND platform=?").run(rating, gameId, platform)
+}
+
+function getCafeGamesWithRatings() {
+  return getDb().prepare('SELECT game_id, platform, game_name, age_rating FROM cafe_games ORDER BY game_name COLLATE NOCASE').all()
 }
 
 function logGameLaunch(sessionId, gameName, platform) {
@@ -279,5 +374,8 @@ module.exports = {
   getPendingCredits, addCredits,
   getActiveSession, startSession, endSession, sessionHistory, enrichSession,
   getCafeGames, addCafeGame, removeCafeGame,
+  getFeaturedGames, setFeaturedGame, removeFeaturedGame,
   verifyAdmin, logGameLaunch,
+  setUserAgeRestriction, setCafeGameRating, getCafeGamesWithRatings,
+  backupDb, checkLoginLock,
 }

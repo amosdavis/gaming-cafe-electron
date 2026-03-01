@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import Login        from './pages/Login'
 import Home         from './pages/Home'
 import Browse       from './pages/Browse'
@@ -10,6 +10,7 @@ export default function App() {
   const [params,  setParams]  = useState({})
   const [user,    setUser]    = useState(null)
   const [session, setSession] = useState(null)
+  const timerRef = useRef(null)
 
   const navigate = useCallback((to, p = {}) => {
     setPage(to)
@@ -25,10 +26,31 @@ export default function App() {
   const onLogout = useCallback(() => {
     setUser(null)
     setSession(null)
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
     navigate('login')
   }, [navigate])
 
   const onSessionUpdate = useCallback((s) => setSession(s), [])
+
+  // F-22 + F-02: Live session timer — refresh every 30s, auto-logout on expiry
+  useEffect(() => {
+    if (!user || !session) {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null }
+      return
+    }
+    timerRef.current = setInterval(async () => {
+      try {
+        const updated = await window.kiosk.refreshSession(user.id)
+        if (!updated) return
+        setSession(updated)
+        if (updated.is_expired) {
+          await window.kiosk.logout()
+          onLogout()
+        }
+      } catch { /* ignore network errors */ }
+    }, 30_000)
+    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null } }
+  }, [user?.id, session?.id, onLogout])
 
   const commonProps = { user, session, onSessionUpdate, navigate, onLogout }
 

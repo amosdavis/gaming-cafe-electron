@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import SessionBar from '../components/SessionBar'
 import Tile        from '../components/Tile'
 
@@ -17,8 +17,21 @@ const PLATFORMS = [
 ]
 
 export default function Home({ user, session, onLogout, onSessionUpdate, navigate }) {
-  const [launching, setLaunching] = useState(null)
-  const [error,     setError]     = useState('')
+  const [launching,      setLaunching]      = useState(null)
+  const [error,          setError]          = useState('')
+  const [featuredGames,  setFeaturedGames]  = useState([])
+  const [gameMap,        setGameMap]        = useState({})
+
+  useEffect(() => {
+    Promise.all([window.kiosk.getFeaturedGames(), window.kiosk.scanGames()])
+      .then(([featured, all]) => {
+        setFeaturedGames(featured)
+        const map = {}
+        all.forEach(g => { map[`${g.id}::${g.platform}`] = g })
+        setGameMap(map)
+      })
+      .catch(() => {})
+  }, [])
 
   const handleLogout = async () => {
     await window.kiosk.logout()
@@ -38,6 +51,20 @@ export default function Home({ user, session, onLogout, onSessionUpdate, navigat
     }
   }
 
+  const handleLaunchFeatured = async (entry) => {
+    const key = `${entry.game_id}::${entry.platform}`
+    setLaunching(key)
+    setError('')
+    try {
+      const result = await window.kiosk.launchGame(entry.game_id, entry.platform)
+      if (result && !result.ok) setError(result.error ?? 'Could not launch game.')
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLaunching(null)
+    }
+  }
+
   return (
     <div className="w-full h-full flex flex-col">
       <SessionBar
@@ -47,16 +74,53 @@ export default function Home({ user, session, onLogout, onSessionUpdate, navigat
         onAdmin={() => navigate('admin')}
       />
 
-      <div className="flex-1 flex flex-col items-center justify-center gap-12 px-8 animate-fade-in">
-        <h2 className="text-2xl font-bold text-steam-muted tracking-widest uppercase text-center">
-          Choose a Platform
-        </h2>
+      <div className="flex-1 flex flex-col items-center justify-center gap-10 px-8 py-6 overflow-y-auto animate-fade-in">
 
         {error && (
           <div className="px-6 py-3 bg-steam-red/20 border border-steam-red/50 rounded-lg text-steam-red text-sm">
             {error}
           </div>
         )}
+
+        {/* F-52: Featured games hero section */}
+        {featuredGames.length > 0 && (
+          <div className="w-full max-w-4xl">
+            <h2 className="text-sm font-bold text-steam-muted tracking-widest uppercase mb-3">⭐ Featured</h2>
+            <div className="flex gap-4 flex-wrap justify-start">
+              {featuredGames.map(f => {
+                const game = gameMap[`${f.game_id}::${f.platform}`]
+                const key  = `${f.game_id}::${f.platform}`
+                return (
+                  <div
+                    key={key}
+                    className={`tile w-48 h-64 ${launching === key ? 'opacity-60 pointer-events-none' : ''}`}
+                    onClick={() => handleLaunchFeatured({ game_id: f.game_id, platform: f.platform })}
+                  >
+                    <img
+                      src={game?.thumb || game?.poster || 'kiosk-resource://images/no_artwork.png'}
+                      alt={game?.name ?? f.game_id}
+                      className="absolute inset-0 w-full h-full object-cover"
+                      onError={e => { e.currentTarget.src = 'kiosk-resource://images/no_artwork.png'; e.currentTarget.onerror = null }}
+                    />
+                    <div className="tile-label relative z-10">
+                      <p className="font-bold leading-tight truncate text-sm">{game?.name ?? f.game_id}</p>
+                      <p className="text-xs text-steam-muted capitalize">{f.platform}</p>
+                    </div>
+                    {launching === key && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-steam-blue text-sm animate-pulse">
+                        Launching…
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        <h2 className="text-2xl font-bold text-steam-muted tracking-widest uppercase text-center">
+          Choose a Platform
+        </h2>
 
         {/* Platform tiles row */}
         <div className="flex gap-6 flex-wrap justify-center">

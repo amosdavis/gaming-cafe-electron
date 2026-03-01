@@ -61,6 +61,11 @@ app.whenReady().then(() => {
     return net.fetch(url.pathToFileURL(absPath).toString())
   })
 
+  // T-21: register as Windows startup item (packaged mode only)
+  if (app.isPackaged) {
+    app.setLoginItemSettings({ openAtLogin: true, name: 'Gaming Cafe Kiosk' })
+  }
+
   registerIpc()
   createWindow()
 

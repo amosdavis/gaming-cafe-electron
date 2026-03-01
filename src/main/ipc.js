@@ -21,6 +21,8 @@ const handle = (channel, fn) => {
   })
 }
 
+let platformLaunching = false
+
 module.exports = function registerIpc() {
 
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -64,6 +66,7 @@ module.exports = function registerIpc() {
     return { ok: true }
   })
   handle('session:history', () => db.sessionHistory())
+  handle('session:refresh', (_, userId) => db.getActiveSession(userId))
 
   // ── Credits ───────────────────────────────────────────────────────────────
 
@@ -81,6 +84,20 @@ module.exports = function registerIpc() {
     const user = db.getCurrentUser()
     const sess = user ? db.getActiveSession(user.id) : null
     if (!sess || sess.is_expired) return { ok: false, error: 'No active session.' }
+
+    // F-58: age gate — block M/AO rated cafe games for under-18 users
+    if (user) {
+      const fullUser = db.getDb().prepare('SELECT under_18 FROM users WHERE id=?').get(user.id)
+      if (fullUser?.under_18) {
+        const cafeGame = db.getDb().prepare(
+          "SELECT age_rating FROM cafe_games WHERE game_id=? AND platform=?"
+        ).get(gameId, platform)
+        if (cafeGame && ['M','AO','18+','R18+'].includes(cafeGame.age_rating)) {
+          return { ok: false, error: 'This game is age-restricted.' }
+        }
+      }
+    }
+
     await launcher.launchGame(gameId, platform)
     db.logGameLaunch(sess.id, gameId, platform)
     return { ok: true }
@@ -90,24 +107,45 @@ module.exports = function registerIpc() {
     const user = db.getCurrentUser()
     const sess = user ? db.getActiveSession(user.id) : null
     if (!sess || sess.is_expired) return { ok: false, error: 'No active session.' }
+    if (platformLaunching) return { ok: false, error: 'A platform is already launching. Please wait.' }
 
+    platformLaunching = true
     const win = getWin()
-    if (win) win.minimize()   // yield the screen to the platform client
+    if (win) win.minimize()
+
+    // F-35: watchdog — restore window after 4 hours if client never exits
+    const watchdog = setTimeout(() => {
+      platformLaunching = false
+      const w = getWin()
+      if (w && w.isMinimized()) { w.restore(); w.focus() }
+    }, 4 * 60 * 60 * 1000)
 
     try {
       const child = await launcher.launchPlatformWithChild(platform)
       if (child) {
-        // Restore kiosk when the platform client exits
         child.on('exit', () => {
+          clearTimeout(watchdog)
+          platformLaunching = false
           const w = getWin()
           if (w) { w.restore(); w.focus() }
         })
+      } else {
+        clearTimeout(watchdog)
+        platformLaunching = false
       }
     } catch (err) {
+      clearTimeout(watchdog)
+      platformLaunching = false
       if (win) { win.restore(); win.focus() }
       return { ok: false, error: err.message }
     }
     return { ok: true }
+  })
+
+  handle('games:checkPath', (_, gamePath) => {
+    if (!gamePath) return false
+    const fs = require('fs')
+    return fs.existsSync(gamePath)
   })
 
   // ── Cafe Library ──────────────────────────────────────────────────────────
@@ -116,9 +154,28 @@ module.exports = function registerIpc() {
   handle('cafe:addGame',    (_, gameId, platform, name) => { db.addCafeGame(gameId, platform, name); return { ok: true } })
   handle('cafe:removeGame', (_, gameId, platform)       => { db.removeCafeGame(gameId, platform);    return { ok: true } })
 
+  // ── Featured Games ────────────────────────────────────────────────────────
+
+  handle('featured:get',    ()                            => db.getFeaturedGames())
+  handle('featured:set',    (_, gameId, platform, pos)    => { db.setFeaturedGame(gameId, platform, pos); return { ok: true } })
+  handle('featured:remove', (_, gameId, platform)         => { db.removeFeaturedGame(gameId, platform);   return { ok: true } })
+
+  // ── Age restrictions ──────────────────────────────────────────────────────
+
+  handle('admin:setUserAgeRestriction', (_, userId, under18) => {
+    db.setUserAgeRestriction(userId, under18)
+    return { ok: true }
+  })
+  handle('admin:setCafeGameRating', (_, gameId, platform, rating) => {
+    db.setCafeGameRating(gameId, platform, rating)
+    return { ok: true }
+  })
+  handle('admin:cafeGamesWithRatings', () => db.getCafeGamesWithRatings())
+
   // ── Admin ─────────────────────────────────────────────────────────────────
 
   handle('admin:verify', (_, pin)                    => db.verifyAdmin(pin))
   handle('admin:users',  ()                          => db.listUsers())
   handle('admin:create', (_, username, pin, display) => db.createUser(username, pin, display))
+  handle('admin:backup', () => { db.backupDb(); return { ok: true } })
 }

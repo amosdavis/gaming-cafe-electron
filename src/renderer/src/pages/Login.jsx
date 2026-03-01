@@ -64,12 +64,22 @@ export default function Login({ onLogin }) {
     setError('')
     try {
       const result = await window.kiosk.login(username.trim(), pin)
+      if (!result) {
+        setError('Incorrect username or PIN.')
+        setStep('pin')
+        return
+      }
+      if (result.locked) {
+        const mins = Math.ceil((result.retry_after_secs ?? 600) / 60)
+        setError(`Too many failed attempts. Try again in ${mins} minute${mins !== 1 ? 's' : ''}.`)
+        setStep('username')
+        return
+      }
       if (!result.ok) {
         setError(result.error ?? 'Incorrect username or PIN.')
         setStep('pin')
         return
       }
-      // Start or resume session
       const sessionResult = await window.kiosk.getOrStartSession(result.user.id)
       if (!sessionResult.ok) {
         setError(sessionResult.error ?? 'Could not start session.')

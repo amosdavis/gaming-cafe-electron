@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('kiosk', {
   getActiveSession:  (userId)                    => ipcRenderer.invoke('session:getActive', userId),
   endSession:        ()                          => ipcRenderer.invoke('session:end'),
   sessionHistory:    ()                          => ipcRenderer.invoke('session:history'),
+  refreshSession:    (userId)                    => ipcRenderer.invoke('session:refresh', userId),
 
   // Credits
   getCredits:        (userId)                    => ipcRenderer.invoke('credits:get', userId),
@@ -21,15 +22,25 @@ contextBridge.exposeInMainWorld('kiosk', {
   scanPlatform:      (platform)                  => ipcRenderer.invoke('games:platform', platform),
   launchGame:        (gameId, platform)          => ipcRenderer.invoke('games:launch', gameId, platform),
   launchPlatform:    (platform)                  => ipcRenderer.invoke('games:launchPlatform', platform),
+  checkGamePath:     (gamePath)                  => ipcRenderer.invoke('games:checkPath', gamePath),
 
   // Cafe Library
   getCafeGames:      ()                          => ipcRenderer.invoke('cafe:getGames'),
   addCafeGame:       (gameId, platform, name)    => ipcRenderer.invoke('cafe:addGame', gameId, platform, name),
   removeCafeGame:    (gameId, platform)          => ipcRenderer.invoke('cafe:removeGame', gameId, platform),
+  // Featured games
+  getFeaturedGames:   ()                          => ipcRenderer.invoke('featured:get'),
+  setFeaturedGame:    (gameId, platform, pos)     => ipcRenderer.invoke('featured:set', gameId, platform, pos),
+  removeFeaturedGame: (gameId, platform)          => ipcRenderer.invoke('featured:remove', gameId, platform),
+  // Age restrictions
+  setUserAgeRestriction: (userId, under18)        => ipcRenderer.invoke('admin:setUserAgeRestriction', userId, under18),
+  setCafeGameRating:  (gameId, platform, rating)  => ipcRenderer.invoke('admin:setCafeGameRating', gameId, platform, rating),
+  getCafeGamesWithRatings: ()                     => ipcRenderer.invoke('admin:cafeGamesWithRatings'),
 
   // Admin
   verifyAdmin:       (pin)                       => ipcRenderer.invoke('admin:verify', pin),
   listUsers:         ()                          => ipcRenderer.invoke('admin:users'),
   createUser:        (username, pin, display)    => ipcRenderer.invoke('admin:create', username, pin, display),
   openSettings:      ()                          => ipcRenderer.invoke('admin:openSettings'),
+  backupDb:          ()                          => ipcRenderer.invoke('admin:backup'),
 })

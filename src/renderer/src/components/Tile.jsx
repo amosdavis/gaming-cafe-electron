@@ -7,8 +7,17 @@ export default function Tile({ label, sublabel, image, onClick, size = 'lg' }) {
   return (
     <div className={`tile ${sizeClass}`} onClick={onClick}>
       {image
-        ? <img src={image} alt={label} className="absolute inset-0 w-full h-full object-cover" />
-        : <div className="absolute inset-0 bg-gradient-to-br from-steam-hover to-steam-card" />
+        ? <img 
+            src={image} 
+            alt={label} 
+            className="absolute inset-0 w-full h-full object-cover"
+            onError={e => { e.currentTarget.src = 'kiosk-resource://images/no_artwork.png'; e.currentTarget.onerror = null }}
+          />
+        : <img 
+            src="kiosk-resource://images/no_artwork.png"
+            alt={label}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
       }
       <div className="tile-label relative z-10">
         <p className="text-lg font-bold leading-tight">{label}</p>
