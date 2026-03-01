@@ -1,7 +1,12 @@
-const { ipcMain } = require('electron')
+const { ipcMain, BrowserWindow } = require('electron')
 const db          = require('./db')
 const scanner     = require('./scanner')
 const launcher    = require('./launcher')
+
+function getWin() {
+  const wins = BrowserWindow.getAllWindows()
+  return wins.length ? wins[0] : null
+}
 
 // T-09: wrap every handler so errors return { ok:false } instead of crashing renderer
 const handle = (channel, fn) => {
@@ -85,7 +90,23 @@ module.exports = function registerIpc() {
     const user = db.getCurrentUser()
     const sess = user ? db.getActiveSession(user.id) : null
     if (!sess || sess.is_expired) return { ok: false, error: 'No active session.' }
-    await launcher.launchPlatform(platform)
+
+    const win = getWin()
+    if (win) win.minimize()   // yield the screen to the platform client
+
+    try {
+      const child = await launcher.launchPlatformWithChild(platform)
+      if (child) {
+        // Restore kiosk when the platform client exits
+        child.on('exit', () => {
+          const w = getWin()
+          if (w) { w.restore(); w.focus() }
+        })
+      }
+    } catch (err) {
+      if (win) { win.restore(); win.focus() }
+      return { ok: false, error: err.message }
+    }
     return { ok: true }
   })
 

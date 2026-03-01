@@ -7,7 +7,10 @@ const registerIpc = require('./ipc')
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) { app.quit(); process.exit(0) }
 
-let mainWindow = null
+let mainWindow  = null
+let appQuitting = false   // true only when explicitly quitting (not when platform steals screen)
+
+function getMainWindow() { return mainWindow }
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -29,6 +32,15 @@ function createWindow() {
     }
   })
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+
+  // Prevent the window from closing unless we initiated the quit.
+  // This stops Steam/Epic fullscreen from killing the kiosk process.
+  mainWindow.on('close', (e) => {
+    if (!appQuitting) {
+      e.preventDefault()
+      mainWindow.minimize()
+    }
+  })
 
   if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -58,6 +70,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  appQuitting = true
   // T-08: always end active session on quit so DB is not left with orphaned session
   try {
     const db   = require('./db')
@@ -81,3 +94,6 @@ app.on('second-instance', () => {
     mainWindow.focus()
   }
 })
+
+module.exports = { getMainWindow }
+

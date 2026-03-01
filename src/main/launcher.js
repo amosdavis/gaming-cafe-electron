@@ -1,4 +1,4 @@
-const { execFile, exec } = require('child_process')
+const { execFile, exec, spawn } = require('child_process')
 const path               = require('path')
 const fs                 = require('fs')
 
@@ -18,31 +18,45 @@ const GOG_EXE = [
 ].find(fs.existsSync) ?? null
 
 /**
- * Launch a platform client directly (Steam, Epic, GOG).
+ * Launch a platform client and return the child process (for exit monitoring).
+ * Steam's bootstrapper re-launches itself, so we spawn it and watch its exit.
  */
-function launchPlatform(platform) {
+function launchPlatformWithChild(platform) {
   return new Promise((resolve, reject) => {
     switch (platform) {
       case 'steam': {
         if (!STEAM_EXE) { reject(new Error('Steam is not installed.')); return }
-        // -bigpicture opens Steam in Big Picture mode
-        const child = execFile(STEAM_EXE, ['-bigpicture'], { detached: true })
+        const child = spawn(STEAM_EXE, ['-bigpicture'], {
+          detached: true,
+          stdio:    'ignore',
+          windowsHide: false,
+        })
         child.unref()
-        resolve()
+        // Steam relaunches itself; the spawned pid exits quickly.
+        // We still return it — the exit event fires and restores the window.
+        resolve(child)
         break
       }
       case 'epic': {
         if (!EPIC_EXE) { reject(new Error('Epic Games Launcher is not installed.')); return }
-        const child = execFile(EPIC_EXE, [], { detached: true })
+        const child = spawn(EPIC_EXE, [], {
+          detached: true,
+          stdio:    'ignore',
+          windowsHide: false,
+        })
         child.unref()
-        resolve()
+        resolve(child)
         break
       }
       case 'gog': {
         if (!GOG_EXE) { reject(new Error('GOG Galaxy is not installed.')); return }
-        const child = execFile(GOG_EXE, [], { detached: true })
+        const child = spawn(GOG_EXE, [], {
+          detached: true,
+          stdio:    'ignore',
+          windowsHide: false,
+        })
         child.unref()
-        resolve()
+        resolve(child)
         break
       }
       default:
@@ -101,4 +115,4 @@ function _launchGog(appId, resolve, reject) {
   })
 }
 
-module.exports = { launchGame, launchPlatform }
+module.exports = { launchGame, launchPlatformWithChild }
