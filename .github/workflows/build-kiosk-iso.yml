@@ -3,6 +3,9 @@ name: Build & Publish Kiosk ISO
 # Triggered on version tags (e.g., v1.0.0) or manually.
 on:
   push:
+    branches:
+      - master
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -52,8 +55,11 @@ jobs:
         run: |
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $v = "${{ github.event.inputs.version }}"
-          } else {
+          } elseif ("${{ github.ref_type }}" -eq "tag") {
             $v = "${{ github.ref_name }}"
+          } else {
+            # Branch push: use short SHA as version suffix
+            $v = "dev-$("${{ github.sha }}".Substring(0, 7))"
           }
           echo "value=$v" >> $env:GITHUB_OUTPUT
           Write-Host "Version: $v"
