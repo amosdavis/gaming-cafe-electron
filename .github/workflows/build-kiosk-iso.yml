@@ -203,6 +203,8 @@ jobs:
             Write-Error "robocopy failed: $LASTEXITCODE"
             exit 1
           }
+          # Reset exit code — robocopy uses non-zero success codes (1=copied, 3=extra, etc.)
+          $global:LASTEXITCODE = 0
 
           Dismount-DiskImage -ImagePath "$pwd\win11.iso" | Out-Null
           Write-Host "ISO staged. Deleting source ISO to free disk space."
