@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+    background-color: #0d1117;
+    color: #c6d4df;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    user-select: none;
+  }
+  /* Custom scrollbar for game lists */
+  ::-webkit-scrollbar       { width: 6px; }
+  ::-webkit-scrollbar-track { background: #161b22; }
+  ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4c7a8c; }
+}
+
+@layer components {
+  .tile {
+    @apply relative flex flex-col items-center justify-end
+           bg-steam-card rounded-xl overflow-hidden cursor-pointer
+           transition-all duration-200 ease-out select-none;
+  }
+  .tile:hover {
+    @apply bg-steam-hover scale-105;
+    box-shadow: 0 0 30px rgba(102,192,244,0.4), 0 8px 32px rgba(0,0,0,0.6);
+  }
+  .tile:active { @apply scale-100; }
+
+  .tile-label {
+    @apply w-full py-3 px-4 text-center text-steam-text font-semibold text-lg
+           bg-gradient-to-t from-black/70 to-transparent;
+  }
+
+  .btn-primary {
+    @apply bg-steam-blue text-steam-bg font-bold py-3 px-8 rounded-lg
+           transition-all duration-150 hover:brightness-110 active:scale-95;
+    box-shadow: 0 0 16px rgba(102,192,244,0.3);
+  }
+  .btn-secondary {
+    @apply bg-steam-panel border border-steam-border text-steam-text font-semibold
+           py-3 px-8 rounded-lg transition-all duration-150
+           hover:border-steam-blue hover:text-steam-blue active:scale-95;
+  }
+  .btn-danger {
+    @apply bg-steam-red/20 border border-steam-red text-steam-red font-semibold
+           py-3 px-6 rounded-lg transition-all duration-150
+           hover:bg-steam-red/30 active:scale-95;
+  }
+
+  .pin-btn {
+    @apply flex items-center justify-center w-20 h-20 rounded-xl text-2xl font-bold
+           bg-steam-card border border-steam-border text-steam-text
+           transition-all duration-100 cursor-pointer select-none
+           hover:bg-steam-hover hover:border-steam-blue hover:text-steam-blue;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .pin-btn:active { @apply scale-95 bg-steam-hover; box-shadow: 0 0 16px rgba(102,192,244,0.4); }
+
+  .input-field {
+    @apply w-full bg-steam-panel border border-steam-border rounded-lg px-4 py-3
+           text-steam-text text-lg placeholder-steam-muted
+           focus:outline-none focus:border-steam-blue;
+    caret-color: #66c0f4;
+  }
+
+  .game-row {
+    @apply flex items-center gap-4 px-6 py-4 rounded-lg cursor-pointer
+           border border-transparent transition-all duration-150
+           hover:bg-steam-card hover:border-steam-border;
+  }
+  .game-row:active { @apply bg-steam-hover; }
+}
+
+/* Neon glow for active session bar */
+.session-bar-glow {
+  border-bottom: 1px solid rgba(102,192,244,0.3);
+  background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
+}
