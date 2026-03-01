@@ -102,6 +102,9 @@ jobs:
     name: Build Windows 11 Kiosk ISO
     runs-on: windows-latest
     needs: build-app
+    permissions:
+      contents: write   # required to push to gh-pages branch
+      pages: write      # required for GitHub Pages deployment
 
     steps:
       - name: Checkout repository
