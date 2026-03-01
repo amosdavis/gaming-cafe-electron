@@ -149,14 +149,17 @@ jobs:
           Write-Host "ADK installer downloaded."
 
       - name: Install Windows ADK (Deployment Tools feature only)
-        shell: cmd
+        shell: pwsh
         run: |
-          adk-setup.exe /quiet /norestart /features OptionId.DeploymentTools
-          if %errorlevel% neq 0 (
-            echo ADK install returned %errorlevel% -- checking if oscdimg is available
-          )
-          :: Give installer time to complete
-          timeout /t 30
+          Write-Host "Installing Windows ADK (Deployment Tools)..."
+          $proc = Start-Process -FilePath "adk-setup.exe" `
+            -ArgumentList "/quiet /norestart /features OptionId.DeploymentTools" `
+            -Wait -PassThru
+          Write-Host "ADK installer exited with code: $($proc.ExitCode)"
+          # Exit codes 0 and 3010 (reboot required) are both success
+          if ($proc.ExitCode -notin @(0, 3010)) {
+            Write-Warning "Unexpected ADK exit code $($proc.ExitCode) — will verify oscdimg next"
+          }
 
       - name: Verify oscdimg.exe is available
         shell: pwsh
