@@ -1,9 +1,11 @@
 name: E2E Kiosk UI Tests
 
+# Runs automatically after the kiosk ISO installation test succeeds,
+# or manually via workflow_dispatch.
 on:
-  push:
-    branches: [master, main]
-  pull_request:
+  workflow_run:
+    workflows: ["Test Kiosk ISO Installation"]
+    types: [completed]
     branches: [master, main]
   workflow_dispatch:
 
@@ -12,6 +14,8 @@ jobs:
     name: Playwright + Electron E2E
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Only run when the installation test passed (or manually triggered)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - name: Checkout repository
