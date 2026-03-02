@@ -70,6 +70,7 @@ jobs:
             qemu-kvm qemu-utils qemu-system-x86 ovmf \
             nbd-client ntfs-3g \
             imagemagick socat \
+            mtools dosfstools \
             ca-certificates curl apt-transport-https lsb-release gnupg
           # Install Azure CLI if not already present
           if ! command -v az &>/dev/null; then
@@ -112,6 +113,25 @@ jobs:
       # ── Create screenshot directory ──────────────────────────────────────────
       - name: Create artifacts directory
         run: mkdir -p screenshots
+
+      # ── EFI startup disk ─────────────────────────────────────────────────────
+      # OVMF with Q35+AHCI falls back to the EFI Shell when bootindex=1 does not
+      # produce a valid BDS boot entry. The EFI Shell auto-executes startup.nsh
+      # from any mapped filesystem. This small FAT disk provides that script so
+      # the shell immediately launches the Windows PE bootloader from the CDROM.
+      - name: Create EFI startup disk for UEFI Shell fallback
+        run: |
+          dd if=/dev/zero of=startup.img bs=512 count=4096
+          mkfs.vfat startup.img
+          {
+            echo 'FS0:\EFI\BOOT\BOOTX64.EFI'
+            echo 'FS1:\EFI\BOOT\BOOTX64.EFI'
+            echo 'FS2:\EFI\BOOT\BOOTX64.EFI'
+            echo 'FS3:\EFI\BOOT\BOOTX64.EFI'
+          } > startup.nsh
+          mcopy -i startup.img startup.nsh ::/startup.nsh
+          echo "EFI startup disk ready:"
+          mdir -i startup.img
 
       # ── Launch QEMU ──────────────────────────────────────────────────────────
       - name: Launch QEMU (headless)
@@ -160,6 +180,8 @@ jobs:
             -device ide-hd,bus=ahci.0,drive=hd0 \
             -drive if=none,id=cdrom0,format=raw,media=cdrom,file=kiosk-test.iso \
             -device ide-cd,bus=ahci.1,drive=cdrom0,bootindex=1 \
+            -drive if=none,id=startup,format=raw,file=startup.img,readonly=on \
+            -device ide-hd,bus=ahci.2,drive=startup \
             -serial file:serial.log \
             -monitor unix:qemu.sock,server,nowait \
             -display none \
