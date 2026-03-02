@@ -413,6 +413,17 @@ export default function Admin({ user, session, onClose, onLogout }) {
                   💾 Backup Database
                 </button>
 
+                <div className="border-t border-steam-border pt-4 flex flex-col gap-3">
+                  <p className="text-xs text-steam-muted uppercase font-semibold tracking-wider">Admin Escape Hatches</p>
+                  <p className="text-xs text-steam-muted">Exits kiosk mode temporarily. Kiosk auto-restores when the window is closed.</p>
+                  <button className="btn-secondary text-left" onClick={() => { onClose(); window.kiosk.launchDesktop() }}>
+                    🖥 Open File Explorer
+                  </button>
+                  <button className="btn-secondary text-left" onClick={() => { onClose(); window.kiosk.launchTerminal() }}>
+                    💻 Open Admin Terminal (PowerShell)
+                  </button>
+                </div>
+
                 <button className="btn-danger text-left" onClick={endSession}>
                   ⏹ End Current Session &amp; Log Out
                 </button>

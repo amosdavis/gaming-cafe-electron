@@ -179,4 +179,24 @@ module.exports = function registerIpc() {
   handle('admin:users',  ()                          => db.listUsers())
   handle('admin:create', (_, username, pin, display) => db.createUser(username, pin, display))
   handle('admin:backup', () => { db.backupDb(); return { ok: true } })
+
+  // ── Admin escape hatches ──────────────────────────────────────────────────
+  // Exit kiosk mode, spawn the requested process, and auto-restore kiosk when
+  // that process exits. This lets admins reach the desktop or a terminal
+  // without permanently leaving kiosk mode.
+
+  const spawnAdminEscape = (exe, args) => {
+    const { spawn } = require('child_process')
+    const win = getWin()
+    if (win) { win.setKiosk(false); win.minimize() }
+    const child = spawn(exe, args, { detached: false, windowsHide: false, shell: false })
+    child.on('exit', () => {
+      const w = getWin()
+      if (w) { w.restore(); w.setKiosk(true); w.focus() }
+    })
+    return { ok: true }
+  }
+
+  handle('admin:launchDesktop',  () => spawnAdminEscape('explorer.exe', ['C:\\']))
+  handle('admin:launchTerminal', () => spawnAdminEscape('powershell.exe', ['-NoExit', '-NoProfile']))
 }

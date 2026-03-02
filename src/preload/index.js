@@ -44,4 +44,6 @@ contextBridge.exposeInMainWorld('kiosk', {
   createUser:        (username, pin, display)    => ipcRenderer.invoke('admin:create', username, pin, display),
   openSettings:      ()                          => ipcRenderer.invoke('admin:openSettings'),
   backupDb:          ()                          => ipcRenderer.invoke('admin:backup'),
+  launchDesktop:     ()                          => ipcRenderer.invoke('admin:launchDesktop'),
+  launchTerminal:    ()                          => ipcRenderer.invoke('admin:launchTerminal'),
 })
