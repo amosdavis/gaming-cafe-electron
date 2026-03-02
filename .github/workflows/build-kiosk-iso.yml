@@ -247,6 +247,15 @@ jobs:
           Copy-Item "artifacts\GamingCafeKiosk-Setup.exe" "$kioskSetupDir\"
           Copy-Item "resources\windows-lockdown.ps1"      "$kioskSetupDir\"
 
+          # Primary injection path: ISO root\KioskSetup\ — found by the autounattend.xml
+          # specialize-pass RunSynchronous command which copies these to C:\KioskSetup\.
+          # This is reliable even when $OEM$\$1\ is skipped with WillWipeDisk=true.
+          $isoKioskDir = "staging\KioskSetup"
+          New-Item -ItemType Directory -Path $isoKioskDir -Force | Out-Null
+          Copy-Item "artifacts\GamingCafeKiosk-Setup.exe" "$isoKioskDir\"
+          Copy-Item "resources\windows-lockdown.ps1"      "$isoKioskDir\"
+          Copy-Item "resources\oem\setup-complete.cmd"    "$isoKioskDir\"
+
           Write-Host "OEM files injected."
 
       # ── Rebuild the bootable ISO ─────────────────────────────────────────────

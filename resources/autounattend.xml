@@ -136,6 +136,29 @@
        PASS 4 — specialize  (first boot after imaging, machine-specific config)
        ═══════════════════════════════════════════════════════════════════════ -->
   <settings pass="specialize">
+
+    <!--
+      Copy kiosk installer and setup script from installation media.
+      $OEM$\$1\ file injection is unreliable with WillWipeDisk=true in Windows 11;
+      this RunSynchronous command finds the still-mounted ISO drive and copies
+      \KioskSetup\ to C:\KioskSetup\ and setup-complete.cmd to the Setup\Scripts
+      location where Windows Setup will run it natively on first boot.
+    -->
+    <component name="Microsoft-Windows-Deployment"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <WillReboot>Never</WillReboot>
+          <Path>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$d=(Get-Volume | Where-Object { $_.DriveLetter -and (Test-Path ($_.DriveLetter+':\KioskSetup\GamingCafeKiosk-Setup.exe')) } | Select-Object -First 1 -ExpandProperty DriveLetter); if($d){ Copy-Item ($d+':\KioskSetup') C:\KioskSetup -Recurse -Force; New-Item -ItemType Directory -Path C:\Windows\Setup\Scripts -Force | Out-Null; Copy-Item ($d+':\KioskSetup\setup-complete.cmd') C:\Windows\Setup\Scripts\SetupComplete.cmd -Force }"</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+    </component>
+
     <component name="Microsoft-Windows-Shell-Setup"
                processorArchitecture="amd64"
                publicKeyToken="31bf3856ad364e35"
