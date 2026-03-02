@@ -69,7 +69,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             qemu-kvm qemu-utils qemu-system-x86 ovmf \
             nbd-client ntfs-3g \
-            imagemagick
+            imagemagick socat
           # Verify KVM is available
           if [ -c /dev/kvm ]; then
             echo "KVM is available — QEMU will run at near-native speed."
@@ -133,11 +133,19 @@ jobs:
             -monitor unix:qemu.sock,server,nowait \
             -display none \
             -name "Gaming Cafe Kiosk Test" \
-            -daemonize
-          echo "QEMU started. PID: $(cat /tmp/qemu.pid 2>/dev/null || echo 'unknown')"
-          sleep 5
-          echo "QEMU process check:"
-          pgrep -a qemu-system-x86_64 || echo "(no match — may have exited early)"
+            -pidfile /tmp/qemu.pid \
+            &>/tmp/qemu-stdout.log &
+          QEMU_PID=$!
+          echo $QEMU_PID > /tmp/qemu-bg.pid
+          echo "QEMU launched (PID ${QEMU_PID}). Waiting 10s for startup..."
+          sleep 10
+          if kill -0 $QEMU_PID 2>/dev/null; then
+            echo "QEMU is running."
+          else
+            echo "ERROR: QEMU exited immediately. stdout log:"
+            cat /tmp/qemu-stdout.log
+            exit 1
+          fi
 
       # ── Screenshot + completion polling loop ─────────────────────────────────
       - name: Wait for setup to complete (poll serial log, screenshot every 2 min)
@@ -222,6 +230,11 @@ jobs:
           if [ -S qemu.sock ]; then
             echo "system_powerdown" | socat - UNIX-CONNECT:qemu.sock 2>/dev/null || true
             sleep 15
+          fi
+          # Kill by saved PID if still running
+          if [ -f /tmp/qemu-bg.pid ]; then
+            QEMU_PID=$(cat /tmp/qemu-bg.pid)
+            kill "$QEMU_PID" 2>/dev/null || true
           fi
           pkill -f "qemu-system-x86_64" 2>/dev/null || true
           sleep 3
