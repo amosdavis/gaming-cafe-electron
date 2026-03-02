@@ -18,7 +18,7 @@ function getMainWindow() { return mainWindow }
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    kiosk:           true,   // F-09/F-25/F-26: OS-level fullscreen kiosk; blocks Alt+Tab, Win+D, task switcher
+    kiosk:           process.env.KIOSK_E2E_TEST !== '1',   // F-09/F-25/F-26: OS-level fullscreen kiosk; blocks Alt+Tab, Win+D, task switcher
     frame:           false,
     backgroundColor: '#0d1117',
     webPreferences: {
@@ -48,7 +48,9 @@ function createWindow() {
 
   if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-    mainWindow.webContents.openDevTools({ mode: 'detach' })
+    if (process.env.KIOSK_E2E_TEST !== '1') {
+      mainWindow.webContents.openDevTools({ mode: 'detach' })
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
@@ -74,15 +76,20 @@ app.whenReady().then(() => {
   createWindow()
 
   // F-09/F-25: block Task Manager and Win+D as a second layer even in kiosk mode
-  app.on('browser-window-focus', () => {
-    globalShortcut.registerAll(
-      ['Control+Shift+Escape', 'Super+D', 'Super+KeyD'],
-      () => false
-    )
-  })
-  app.on('browser-window-blur', () => {
-    globalShortcut.unregisterAll()
-  })
+  // Skipped in test mode (Linux runners don't have these keys anyway)
+  if (process.env.KIOSK_E2E_TEST !== '1') {
+    app.on('browser-window-focus', () => {
+      try {
+        globalShortcut.registerAll(
+          ['Control+Shift+Escape', 'Super+D', 'Super+KeyD'],
+          () => {}
+        )
+      } catch { /* ignore: some platforms reject unknown accelerators */ }
+    })
+    app.on('browser-window-blur', () => {
+      globalShortcut.unregisterAll()
+    })
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

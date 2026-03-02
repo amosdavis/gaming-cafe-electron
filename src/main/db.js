@@ -4,7 +4,7 @@ const crypto    = require('crypto')
 const os        = require('os')
 const fs        = require('fs')
 
-const DB_DIR  = path.join(os.homedir(), 'AppData', 'Roaming', 'gaming-cafe-electron')
+const DB_DIR  = process.env.KIOSK_TEST_DB_DIR || path.join(os.homedir(), 'AppData', 'Roaming', 'gaming-cafe-electron')
 const DB_PATH = path.join(DB_DIR, 'gamingcafe.db')
 
 let _db = null
@@ -176,7 +176,7 @@ function createUser(username, pin, displayName = '') {
 
 function listUsers() {
   const db = getDb()
-  const users = db.prepare('SELECT id, username, display_name, active FROM users ORDER BY username').all()
+  const users = db.prepare('SELECT id, username, display_name, active, under_18 FROM users ORDER BY username').all()
   return users.map(u => ({
     ...u,
     credits: getPendingCredits(u.id)

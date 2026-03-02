@@ -12,6 +12,7 @@ export default defineConfig({
           db:      resolve('src/main/db.js'),
           ipc:     resolve('src/main/ipc.js'),
           launcher:resolve('src/main/launcher.js'),
+          logger:  resolve('src/main/logger.js'),
           scanner: resolve('src/main/scanner.js'),
         }
       }

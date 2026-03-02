@@ -30,6 +30,7 @@ module.exports = function registerIpc() {
   handle('auth:login', (_, username, pin) => {
     const user = db.login(username, pin)
     if (!user) return { ok: false, error: 'Incorrect username or PIN.' }
+    if (user.locked) return { ok: false, locked: true, retry_after_secs: user.retry_after_secs }
     db.setCurrentUser(user.id)
     return { ok: true, user }
   })

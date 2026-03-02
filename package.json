@@ -4,17 +4,21 @@
   "description": "Gaming Cafe Kiosk – Electron + React",
   "main": "out/main/index.js",
   "scripts": {
-    "dev":         "electron-vite dev",
-    "build":       "electron-vite build",
-    "start":       "electron-vite preview",
-    "dist":        "npm run build && electron-builder",
-    "postinstall": "electron-rebuild -f -w better-sqlite3"
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "dist": "npm run build && electron-builder",
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "test:e2e": "npm run build && xvfb-run -a npx playwright test",
+    "test:e2e:headed": "npm run build && npx playwright test --headed",
+    "test:e2e:debug": "npx playwright test --headed --debug"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
+    "@playwright/test": "^1.58.2",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.18",
     "electron": "^29.1.0",
