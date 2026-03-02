@@ -14,7 +14,7 @@
     - TimeZone, UILanguage, SystemLocale, UserLocale can be adjusted as needed
 
   CI: QEMU uses Q35 machine + ich9-ahci CDROM (bootindex=1) for OVMF UEFI boot compatibility.
-  CI: A startup.nsh FAT disk on ahci.2 provides EFI Shell fallback boot of Windows PE (r3).
+  CI: A startup.nsh FAT disk on ahci.2 provides EFI Shell fallback boot of Windows PE (r4).
 -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
 

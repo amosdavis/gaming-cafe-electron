@@ -184,7 +184,7 @@ jobs:
             -device ide-hd,bus=ahci.2,drive=startup \
             -serial file:serial.log \
             -monitor unix:qemu.sock,server,nowait \
-            -display none \
+            -display vnc=127.0.0.1:1 \
             -name "Gaming Cafe Kiosk Test" \
             -pidfile /tmp/qemu.pid \
             &>/tmp/qemu-stdout.log &
@@ -193,7 +193,8 @@ jobs:
           echo "QEMU launched (PID ${QEMU_PID}). Waiting 10s for startup..."
           sleep 10
           if kill -0 $QEMU_PID 2>/dev/null; then
-            echo "QEMU is running."
+            echo "QEMU is running. Initial stdout:"
+            cat /tmp/qemu-stdout.log || true
           else
             echo "ERROR: QEMU exited immediately. stdout log:"
             cat /tmp/qemu-stdout.log
@@ -202,28 +203,38 @@ jobs:
 
       # ── Screenshot + completion polling loop ─────────────────────────────────
       - name: Wait for setup to complete (poll serial log, screenshot every 2 min)
-        timeout-minutes: 100
+        timeout-minutes: 200
         run: |
           SCREENSHOT_N=0
           FOUND=false
           START=$(date +%s)
-          TIMEOUT=5400  # 90 minutes
+          TIMEOUT=10800  # 180 minutes
 
           take_screenshot() {
             local name="$1"
             if [ -S qemu.sock ]; then
               echo "screendump /tmp/qemu-screen.ppm" | socat - UNIX-CONNECT:qemu.sock 2>/dev/null || true
               if [ -f /tmp/qemu-screen.ppm ]; then
+                local sz
+                sz=$(wc -c < /tmp/qemu-screen.ppm 2>/dev/null || echo 0)
                 convert /tmp/qemu-screen.ppm "screenshots/${name}.png" 2>/dev/null || \
                   cp /tmp/qemu-screen.ppm "screenshots/${name}.ppm"
-                echo "Screenshot saved: ${name}"
+                echo "Screenshot saved: ${name} (framebuffer ${sz} bytes)"
+              else
+                echo "WARNING: screendump produced no file for ${name}"
               fi
             fi
           }
 
-          # Take an initial screenshot after 30s
+          # Take an initial screenshot after 30s and dump startup diagnostics
           sleep 30
           take_screenshot "00-initial"
+          echo "=== QEMU stdout at +30s ==="
+          cat /tmp/qemu-stdout.log 2>/dev/null || echo "(qemu stdout empty)"
+          echo "=== Serial log at +30s ==="
+          cat serial.log 2>/dev/null || echo "(serial.log empty)"
+          echo "=== QEMU PID still running? ==="
+          kill -0 "$(cat /tmp/qemu-bg.pid 2>/dev/null)" 2>/dev/null && echo "Yes" || echo "No — QEMU exited!"
 
           while true; do
             ELAPSED=$(( $(date +%s) - START ))
@@ -245,8 +256,18 @@ jobs:
             # Timeout
             if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
               echo "ERROR: Timed out after ${TIMEOUT}s waiting for KIOSK_SETUP_COMPLETE."
+              echo "=== QEMU stdout ==="
+              cat /tmp/qemu-stdout.log 2>/dev/null || echo "(empty)"
+              echo "=== Serial log ==="
               cat serial.log 2>/dev/null || echo "(serial.log empty)"
               exit 1
+            fi
+
+            # Every 900s (15 min) dump serial.log for in-progress diagnostics
+            MOD15=$(( ELAPSED % 900 ))
+            if [ "$MOD15" -lt 10 ] && [ "$ELAPSED" -gt 60 ]; then
+              echo "--- Serial log at ${ELAPSED}s ---"
+              cat serial.log 2>/dev/null || echo "(empty)"
             fi
 
             # Every 120 s take a screenshot
@@ -336,6 +357,12 @@ jobs:
           sudo qemu-nbd -d /dev/nbd0 2>/dev/null || true
 
       # ── Upload artifacts ─────────────────────────────────────────────────────
+      - name: Collect diagnostic logs
+        if: always()
+        run: |
+          cp /tmp/qemu-stdout.log screenshots/qemu-stdout.log 2>/dev/null || true
+          cp serial.log screenshots/serial.log 2>/dev/null || true
+
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
