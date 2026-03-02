@@ -33,15 +33,14 @@ jobs:
       - name: Install system packages (xvfb, Electron deps)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y \
-            xvfb \
-            libgtk-3-0 \
-            libgbm1 \
-            libasound2 \
-            libnss3 \
-            libxss1 \
-            libxtst6 \
-            libxrandr2
+          # Install packages that exist on all supported Ubuntu versions
+          sudo apt-get install -y xvfb libnss3 libxss1 libxtst6 libxrandr2 libgbm1
+          # libgtk-3-0 was renamed libgtk-3-0t64 on Ubuntu 24.04+
+          sudo apt-get install -y libgtk-3-0 2>/dev/null \
+            || sudo apt-get install -y libgtk-3-0t64 2>/dev/null || true
+          # libasound2 was renamed libasound2t64 on Ubuntu 24.04+
+          sudo apt-get install -y libasound2 2>/dev/null \
+            || sudo apt-get install -y libasound2t64 2>/dev/null || true
 
       - name: Build Electron app
         run: npm run build
