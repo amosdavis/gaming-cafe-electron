@@ -11,6 +11,9 @@ set SETUP_DIR=C:\KioskSetup
 
 echo [%date% %time%] === Gaming Cafe Kiosk First-Boot Setup === >> %LOG%
 
+:: Signal to CI that setup-complete.cmd has started running.
+powershell.exe -NoProfile -Command "$p = New-Object System.IO.Ports.SerialPort 'COM1',9600; $p.Open(); $p.WriteLine('KIOSK_SETUP_STARTED'); $p.Close()" >> %LOG% 2>&1
+
 :: ── Step 1: Wait for network / desktop to stabilise ─────────────────────────
 echo [%date% %time%] Waiting for system to stabilise... >> %LOG%
 timeout /t 10 /nobreak > nul
@@ -102,5 +105,6 @@ shutdown /r /t 0 /f /c "Gaming Cafe Kiosk setup complete — rebooting"
 exit /b 0
 
 :error
+powershell.exe -NoProfile -Command "$p = New-Object System.IO.Ports.SerialPort 'COM1',9600; $p.Open(); $p.WriteLine('KIOSK_SETUP_FAILED'); $p.Close()" >> %LOG% 2>&1
 echo [%date% %time%] === First-boot setup FAILED. Check %LOG% === >> %LOG%
 exit /b 1

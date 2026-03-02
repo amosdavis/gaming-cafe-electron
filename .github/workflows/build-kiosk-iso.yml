@@ -263,6 +263,23 @@ jobs:
 
           Write-Host "OEM files injected."
 
+      # ── Inject EFI Shell startup script ──────────────────────────────────────
+      # OVMF Q35+AHCI falls to the EFI Shell when the CDROM Boot entry times out.
+      # The EFI Shell auto-executes startup.nsh from the root of every mapped FS.
+      # The UDF volume of the ISO is always mapped (FS0 or FS1); placing startup.nsh
+      # at the staging root guarantees it is found without a separate FAT disk.
+      - name: Inject EFI Shell startup.nsh into ISO root
+        shell: pwsh
+        run: |
+          $content = @"
+FS0:\EFI\BOOT\BOOTX64.EFI
+FS1:\EFI\BOOT\BOOTX64.EFI
+FS2:\EFI\BOOT\BOOTX64.EFI
+FS3:\EFI\BOOT\BOOTX64.EFI
+"@
+          Set-Content "staging\startup.nsh" -Value $content -Encoding ASCII -NoNewline
+          Write-Host "startup.nsh injected at ISO root for EFI Shell auto-boot."
+
       # ── Rebuild the bootable ISO ─────────────────────────────────────────────
       - name: Rebuild bootable ISO with oscdimg
         shell: pwsh
