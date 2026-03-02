@@ -14,7 +14,7 @@
     - TimeZone, UILanguage, SystemLocale, UserLocale can be adjusted as needed
 
   CI: QEMU uses Q35 machine + ich9-ahci CDROM (bootindex=1) for OVMF UEFI boot compatibility.
-  CI: startup.nsh is now baked into the ISO root (UDF volume) for EFI Shell auto-boot (r6).
+  CI: startup.nsh is now baked into the ISO root (UDF volume) for EFI Shell auto-boot (r7).
 -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
 
@@ -158,6 +158,11 @@
           <Order>1</Order>
           <WillReboot>Never</WillReboot>
           <Path>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$d=(Get-Volume | Where-Object { $_.DriveLetter -and (Test-Path ($_.DriveLetter+':\KioskSetup\GamingCafeKiosk-Setup.exe')) } | Select-Object -First 1 -ExpandProperty DriveLetter); if($d){ Copy-Item ($d+':\KioskSetup') C:\KioskSetup -Recurse -Force; New-Item -ItemType Directory -Path C:\Windows\Setup\Scripts -Force | Out-Null; Copy-Item ($d+':\KioskSetup\setup-complete.cmd') C:\Windows\Setup\Scripts\SetupComplete.cmd -Force }"</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <WillReboot>Never</WillReboot>
+          <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v BypassNRO /t REG_DWORD /d 1 /f</Path>
         </RunSynchronousCommand>
       </RunSynchronous>
     </component>

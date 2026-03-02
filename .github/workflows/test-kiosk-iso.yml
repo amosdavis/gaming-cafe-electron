@@ -158,10 +158,12 @@ jobs:
             -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
             -drive if=pflash,format=raw,file=ovmf-vars.fd \
             -device ich9-ahci,id=ahci \
-            -drive if=none,id=hd0,format=qcow2,file=kiosk-vm.qcow2 \
+            -drive if=none,id=hd0,format=qcow2,file=kiosk-vm.qcow2,cache=unsafe,aio=threads \
             -device ide-hd,bus=ahci.0,drive=hd0 \
             -drive if=none,id=cdrom0,format=raw,media=cdrom,file=kiosk-test.iso \
             -device ide-cd,bus=ahci.1,drive=cdrom0,bootindex=1 \
+            -device e1000,netdev=net0 \
+            -netdev user,id=net0 \
             -serial file:serial.log \
             -monitor unix:qemu.sock,server,nowait \
             -display vnc=127.0.0.1:1 \
@@ -175,6 +177,9 @@ jobs:
           if kill -0 $QEMU_PID 2>/dev/null; then
             echo "QEMU is running. Initial stdout:"
             cat /tmp/qemu-stdout.log || true
+            sleep 20
+            echo "=== KVM status at +30s ==="
+            echo "info kvm" | socat - UNIX-CONNECT:qemu.sock 2>/dev/null || echo "(monitor not yet ready)"
           else
             echo "ERROR: QEMU exited immediately. stdout log:"
             cat /tmp/qemu-stdout.log
@@ -183,12 +188,12 @@ jobs:
 
       # ── Screenshot + completion polling loop ─────────────────────────────────
       - name: Wait for setup to complete (poll serial log, screenshot every 2 min)
-        timeout-minutes: 200
+        timeout-minutes: 310
         run: |
           SCREENSHOT_N=0
           FOUND=false
           START=$(date +%s)
-          TIMEOUT=10800  # 180 minutes
+          TIMEOUT=18000  # 300 minutes
 
           take_screenshot() {
             local name="$1"
