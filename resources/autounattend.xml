@@ -229,15 +229,6 @@
         <LogonCount>999</LogonCount>
       </AutoLogon>
 
-      <!-- Run SetupComplete.cmd on first login -->
-      <FirstLogonCommands>
-        <SynchronousCommand wcm:action="add">
-          <Order>1</Order>
-          <CommandLine>cmd /c "C:\Windows\Setup\Scripts\SetupComplete.cmd" &gt;&gt; "C:\Windows\Setup\Scripts\SetupComplete.log" 2&gt;&amp;1</CommandLine>
-          <RequiresUserInput>false</RequiresUserInput>
-        </SynchronousCommand>
-      </FirstLogonCommands>
-
     </component>
   </settings>
 
