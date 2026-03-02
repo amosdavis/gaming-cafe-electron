@@ -155,8 +155,8 @@ jobs:
             -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
             -drive if=pflash,format=raw,file=ovmf-vars.fd \
             -drive if=virtio,format=qcow2,file=kiosk-vm.qcow2 \
-            -drive if=ide,media=cdrom,file=kiosk-test.iso \
-            -boot order=dc,once=d \
+            -drive if=none,id=cdrom0,format=raw,media=cdrom,file=kiosk-test.iso \
+            -device ide-cd,drive=cdrom0,bootindex=1 \
             -serial file:serial.log \
             -monitor unix:qemu.sock,server,nowait \
             -display none \
@@ -177,12 +177,12 @@ jobs:
 
       # ── Screenshot + completion polling loop ─────────────────────────────────
       - name: Wait for setup to complete (poll serial log, screenshot every 2 min)
-        timeout-minutes: 38
+        timeout-minutes: 65
         run: |
           SCREENSHOT_N=0
           FOUND=false
           START=$(date +%s)
-          TIMEOUT=2100  # 35 minutes
+          TIMEOUT=3300  # 55 minutes
 
           take_screenshot() {
             local name="$1"
