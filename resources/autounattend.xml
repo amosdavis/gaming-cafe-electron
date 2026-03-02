@@ -12,6 +12,8 @@
     - Replace __KIOSK_PASSWORD__ with the desired KioskAdmin account password
       (the GitHub Actions workflow substitutes this from the KIOSK_PASSWORD secret)
     - TimeZone, UILanguage, SystemLocale, UserLocale can be adjusted as needed
+
+  CI: QEMU uses Q35 machine + ich9-ahci CDROM (bootindex=1) for OVMF UEFI boot compatibility.
 -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
 

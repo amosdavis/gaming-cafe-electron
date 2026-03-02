@@ -150,13 +150,16 @@ jobs:
 
           qemu-system-x86_64 \
             $KVM_FLAG \
+            -machine q35 \
             -m 4096 \
             -smp 4 \
             -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
             -drive if=pflash,format=raw,file=ovmf-vars.fd \
-            -drive if=virtio,format=qcow2,file=kiosk-vm.qcow2 \
+            -device ich9-ahci,id=ahci \
+            -drive if=none,id=hd0,format=qcow2,file=kiosk-vm.qcow2 \
+            -device ide-hd,bus=ahci.0,drive=hd0 \
             -drive if=none,id=cdrom0,format=raw,media=cdrom,file=kiosk-test.iso \
-            -device ide-cd,drive=cdrom0,bootindex=1 \
+            -device ide-cd,bus=ahci.1,drive=cdrom0,bootindex=1 \
             -serial file:serial.log \
             -monitor unix:qemu.sock,server,nowait \
             -display none \
@@ -177,12 +180,12 @@ jobs:
 
       # ── Screenshot + completion polling loop ─────────────────────────────────
       - name: Wait for setup to complete (poll serial log, screenshot every 2 min)
-        timeout-minutes: 65
+        timeout-minutes: 100
         run: |
           SCREENSHOT_N=0
           FOUND=false
           START=$(date +%s)
-          TIMEOUT=3300  # 55 minutes
+          TIMEOUT=5400  # 90 minutes
 
           take_screenshot() {
             local name="$1"
