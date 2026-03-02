@@ -119,9 +119,32 @@ jobs:
           KVM_FLAG=""
           [ -c /dev/kvm ] && KVM_FLAG="-enable-kvm"
 
-          # OVMF UEFI firmware paths (Ubuntu package locations)
-          OVMF_CODE="/usr/share/OVMF/OVMF_CODE.fd"
-          OVMF_VARS="/usr/share/OVMF/OVMF_VARS.fd"
+          # Locate OVMF firmware (paths differ across Ubuntu versions)
+          OVMF_CODE=""
+          for p in \
+            /usr/share/OVMF/OVMF_CODE.fd \
+            /usr/share/OVMF/OVMF_CODE_4M.fd \
+            /usr/share/edk2/x64/OVMF_CODE.fd \
+            /usr/share/qemu/OVMF.fd; do
+            if [ -f "$p" ]; then OVMF_CODE="$p"; break; fi
+          done
+          OVMF_VARS=""
+          for p in \
+            /usr/share/OVMF/OVMF_VARS.fd \
+            /usr/share/OVMF/OVMF_VARS_4M.fd \
+            /usr/share/edk2/x64/OVMF_VARS.fd; do
+            if [ -f "$p" ]; then OVMF_VARS="$p"; break; fi
+          done
+          if [ -z "$OVMF_CODE" ] || [ -z "$OVMF_VARS" ]; then
+            echo "ERROR: OVMF firmware files not found. Listing /usr/share/OVMF/:"
+            ls /usr/share/OVMF/ 2>/dev/null || true
+            echo "Listing /usr/share/edk2/ :"
+            ls /usr/share/edk2/ 2>/dev/null || true
+            exit 1
+          fi
+          echo "Using OVMF_CODE=${OVMF_CODE}"
+          echo "Using OVMF_VARS=${OVMF_VARS}"
+
           # Copy VARS so each run gets a fresh writable copy
           cp "$OVMF_VARS" ovmf-vars.fd
 
