@@ -271,13 +271,13 @@ jobs:
       - name: Inject EFI Shell startup.nsh into ISO root
         shell: pwsh
         run: |
-          $content = @"
-FS0:\EFI\BOOT\BOOTX64.EFI
-FS1:\EFI\BOOT\BOOTX64.EFI
-FS2:\EFI\BOOT\BOOTX64.EFI
-FS3:\EFI\BOOT\BOOTX64.EFI
-"@
-          Set-Content "staging\startup.nsh" -Value $content -Encoding ASCII -NoNewline
+          $lines = @(
+            'FS0:\EFI\BOOT\BOOTX64.EFI',
+            'FS1:\EFI\BOOT\BOOTX64.EFI',
+            'FS2:\EFI\BOOT\BOOTX64.EFI',
+            'FS3:\EFI\BOOT\BOOTX64.EFI'
+          )
+          Set-Content "staging\startup.nsh" -Value $lines -Encoding ASCII
           Write-Host "startup.nsh injected at ISO root for EFI Shell auto-boot."
 
       # ── Rebuild the bootable ISO ─────────────────────────────────────────────
