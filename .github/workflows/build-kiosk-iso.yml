@@ -8,6 +8,11 @@ on:
       - main
     tags:
       - 'v*'
+    paths-ignore:
+      - '.github/**'
+      - '*.md'
+      - 'docs/**'
+      - 'tests/**'
   workflow_dispatch:
     inputs:
       version:
