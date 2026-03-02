@@ -90,6 +90,12 @@ reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" ^
 echo [%date% %time%] Cleanup scheduled. >> %LOG%
 
 :: ── Done ─────────────────────────────────────────────────────────────────────
+:: Signal completion to the QEMU serial port (COM1 → serial.log on the host).
+:: This lets the automated test workflow detect when setup is finished.
+powershell.exe -NoProfile -Command ^
+    "$p = New-Object System.IO.Ports.SerialPort 'COM1',9600; $p.Open(); $p.WriteLine('KIOSK_SETUP_COMPLETE'); $p.Close()" ^
+    >> %LOG% 2>&1
+
 echo [%date% %time%] === First-boot setup COMPLETE. Rebooting in 5s... === >> %LOG%
 timeout /t 5 /nobreak > nul
 shutdown /r /t 0 /f /c "Gaming Cafe Kiosk setup complete — rebooting"
