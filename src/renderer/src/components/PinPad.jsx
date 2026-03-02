@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 const KEYS = [
   ['1','2','3'],
@@ -20,6 +20,24 @@ export default function PinPad({ onSubmit, onCancel, maxLen = 8 }) {
       setDigits(d => d.length < maxLen ? d + key : d)
     }
   }
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key >= '0' && e.key <= '9') {
+        press(e.key)
+      } else if (e.key === 'Backspace') {
+        press('⌫')
+      } else if (e.key === 'Enter') {
+        press('✓')
+      } else if (e.key === 'Escape' && onCancel) {
+        onCancel()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  // press changes every render; list only the stable deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [digits, onSubmit, onCancel, maxLen])
 
   return (
     <div className="flex flex-col items-center gap-4 animate-slide-up">
