@@ -180,7 +180,7 @@ jobs:
             -device ide-hd,bus=ahci.0,drive=hd0 \
             -drive if=none,id=cdrom0,format=raw,media=cdrom,file=kiosk-test.iso \
             -device ide-cd,bus=ahci.1,drive=cdrom0,bootindex=1 \
-            -drive if=none,id=startup,format=raw,file=startup.img,readonly=on \
+            -drive if=none,id=startup,format=raw,file=startup.img \
             -device ide-hd,bus=ahci.2,drive=startup \
             -serial file:serial.log \
             -monitor unix:qemu.sock,server,nowait \
