@@ -14,7 +14,7 @@
     - TimeZone, UILanguage, SystemLocale, UserLocale can be adjusted as needed
 
   CI: QEMU uses Q35 machine + ich9-ahci CDROM (bootindex=1) for OVMF UEFI boot compatibility.
-  CI: startup.nsh is now baked into the ISO root (UDF volume) for EFI Shell auto-boot (r8).
+  CI: startup.nsh is now baked into the ISO root (UDF volume) for EFI Shell auto-boot (r9).
 -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
 

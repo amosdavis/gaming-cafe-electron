@@ -85,7 +85,7 @@ jobs:
       - name: Install Gaming Cafe Kiosk (silent NSIS)
         shell: pwsh
         run: |
-          $installer = "$env:ISO_DRIVE:\KioskSetup\GamingCafeKiosk-Setup.exe"
+          $installer = "${env:ISO_DRIVE}:\KioskSetup\GamingCafeKiosk-Setup.exe"
           Write-Host "Running: $installer /S"
           $p = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
           Write-Host "Exit code: $($p.ExitCode)"
@@ -104,7 +104,7 @@ jobs:
       - name: Run OS lockdown script
         shell: pwsh
         run: |
-          $lockdown = "$env:ISO_DRIVE:\KioskSetup\windows-lockdown.ps1"
+          $lockdown = "${env:ISO_DRIVE}:\KioskSetup\windows-lockdown.ps1"
           Write-Host "Running: $lockdown"
           # Use a non-existent test user so group membership is not modified
           powershell.exe -NoProfile -ExecutionPolicy Bypass `
