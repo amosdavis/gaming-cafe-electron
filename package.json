@@ -39,6 +39,9 @@
       "target": "nsis",
       "icon": "resources/icon.ico"
     },
+    "nsis": {
+      "perMachine": true
+    },
     "files": [
       "out/**/*",
       "resources/**/*"
