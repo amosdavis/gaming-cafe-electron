@@ -229,6 +229,7 @@ jobs:
         env:
           CI: true
           ELECTRON_DISABLE_GPU: '1'
+          KIOSK_E2E_TEST: '1'
 
       - name: Upload test report on failure
         if: failure()
