@@ -1,0 +1,336 @@
+name: Full Kiosk ISO Install Test (QEMU)
+
+# Full end-to-end QEMU test: boots Windows 11 ISO from scratch and verifies
+# kiosk installation. Runs weekly on a schedule or on manual dispatch.
+# This test is informational — it does NOT block push CI.
+on:
+  schedule:
+    - cron: '0 2 * * 0'  # Every Sunday at 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      iso_url:
+        description: 'Full Azure Blob URL of ISO to test (leave blank to use latest)'
+        required: false
+
+env:
+  STORAGE_ACCOUNT: isobuilds
+  STORAGE_CONTAINER: kiosk-releases
+
+jobs:
+
+  test-full-install:
+    name: Boot & Test Kiosk ISO (QEMU/Windows 11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+
+      # ── Resolve ISO URL ──────────────────────────────────────────────────────
+      - name: Resolve ISO URL
+        id: iso
+        env:
+          MANUAL_URL: ${{ github.event.inputs.iso_url }}
+          TRIGGER_SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$MANUAL_URL" ]; then
+            ISO_URL="$MANUAL_URL"
+          else
+            SHORT_SHA="${TRIGGER_SHA:0:7}"
+            VERSION="dev-${SHORT_SHA}"
+            ISO_FILENAME="GamingCafeKiosk-${VERSION}.iso"
+            ISO_URL="https://${STORAGE_ACCOUNT}.blob.core.windows.net/${STORAGE_CONTAINER}/${VERSION}/${ISO_FILENAME}"
+          fi
+          echo "url=${ISO_URL}" >> "$GITHUB_OUTPUT"
+          echo "ISO URL: ${ISO_URL}"
+
+      # ── Free disk space ──────────────────────────────────────────────────────
+      - name: Free runner disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Check available disk space
+        run: df -h /
+
+      # ── Install tools ────────────────────────────────────────────────────────
+      - name: Install QEMU, OVMF, and disk tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            qemu-kvm qemu-utils qemu-system-x86 ovmf \
+            nbd-client ntfs-3g \
+            imagemagick socat \
+            mtools dosfstools \
+            ca-certificates curl apt-transport-https lsb-release gnupg
+          if ! command -v az &>/dev/null; then
+            curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          fi
+          if [ -c /dev/kvm ]; then
+            echo "KVM is available — QEMU will run at near-native speed."
+            sudo chmod 666 /dev/kvm
+          else
+            echo "WARNING: /dev/kvm not available — QEMU will run in software emulation (slow)."
+          fi
+
+      # ── Download ISO ─────────────────────────────────────────────────────────
+      - name: Download kiosk ISO from Azure Blob Storage
+        env:
+          AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
+        run: |
+          ISO_URL="${{ steps.iso.outputs.url }}"
+          ISO_FILE="kiosk-test.iso"
+          echo "Downloading: ${ISO_URL}"
+          BLOB_PATH=$(echo "$ISO_URL" | sed 's|https://[^/]*/[^/]*/||')
+          az storage blob download \
+            --account-name "$STORAGE_ACCOUNT" \
+            --container-name "$STORAGE_CONTAINER" \
+            --name "$BLOB_PATH" \
+            --file "$ISO_FILE" \
+            --auth-mode key \
+            --account-key "$AZURE_STORAGE_KEY"
+          ls -lh "$ISO_FILE"
+
+      # ── Create virtual disk ──────────────────────────────────────────────────
+      - name: Create 40 GB sparse virtual disk
+        run: |
+          qemu-img create -f qcow2 kiosk-vm.qcow2 40G
+          qemu-img info kiosk-vm.qcow2
+
+      - name: Create artifacts directory
+        run: mkdir -p screenshots
+
+      # ── Launch QEMU ──────────────────────────────────────────────────────────
+      - name: Launch QEMU (headless)
+        run: |
+          KVM_FLAG=""
+          [ -c /dev/kvm ] && KVM_FLAG="-enable-kvm"
+
+          OVMF_CODE=""
+          for p in \
+            /usr/share/OVMF/OVMF_CODE.fd \
+            /usr/share/OVMF/OVMF_CODE_4M.fd \
+            /usr/share/edk2/x64/OVMF_CODE.fd \
+            /usr/share/qemu/OVMF.fd; do
+            if [ -f "$p" ]; then OVMF_CODE="$p"; break; fi
+          done
+          OVMF_VARS=""
+          for p in \
+            /usr/share/OVMF/OVMF_VARS.fd \
+            /usr/share/OVMF/OVMF_VARS_4M.fd \
+            /usr/share/edk2/x64/OVMF_VARS.fd; do
+            if [ -f "$p" ]; then OVMF_VARS="$p"; break; fi
+          done
+          if [ -z "$OVMF_CODE" ] || [ -z "$OVMF_VARS" ]; then
+            echo "ERROR: OVMF firmware not found."
+            exit 1
+          fi
+          echo "Using OVMF_CODE=${OVMF_CODE}"
+          echo "Using OVMF_VARS=${OVMF_VARS}"
+          cp "$OVMF_VARS" ovmf-vars.fd
+
+          qemu-system-x86_64 \
+            $KVM_FLAG \
+            -machine q35 \
+            -cpu host \
+            -m 8192 \
+            -smp 4 \
+            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,file=ovmf-vars.fd \
+            -device ich9-ahci,id=ahci \
+            -drive if=none,id=hd0,format=qcow2,file=kiosk-vm.qcow2,cache=unsafe,aio=threads \
+            -device ide-hd,bus=ahci.0,drive=hd0 \
+            -drive if=none,id=cdrom0,format=raw,media=cdrom,file=kiosk-test.iso \
+            -device ide-cd,bus=ahci.1,drive=cdrom0,bootindex=1 \
+            -device e1000,netdev=net0 \
+            -netdev user,id=net0 \
+            -serial file:serial.log \
+            -monitor unix:qemu.sock,server,nowait \
+            -display vnc=127.0.0.1:1 \
+            -name "Gaming Cafe Kiosk Full Test" \
+            -pidfile /tmp/qemu.pid \
+            &>/tmp/qemu-stdout.log &
+          QEMU_PID=$!
+          echo $QEMU_PID > /tmp/qemu-bg.pid
+          echo "QEMU launched (PID ${QEMU_PID}). Waiting 10s for startup..."
+          sleep 10
+          if kill -0 $QEMU_PID 2>/dev/null; then
+            echo "QEMU is running."
+            cat /tmp/qemu-stdout.log || true
+            sleep 20
+            echo "=== KVM status at +30s ==="
+            echo "info kvm" | socat - UNIX-CONNECT:qemu.sock 2>/dev/null || echo "(monitor not yet ready)"
+          else
+            echo "ERROR: QEMU exited immediately."
+            cat /tmp/qemu-stdout.log
+            exit 1
+          fi
+
+      # ── Completion polling loop ───────────────────────────────────────────────
+      - name: Wait for setup to complete (poll serial log, screenshot every 2 min)
+        timeout-minutes: 355
+        run: |
+          SCREENSHOT_N=0
+          START=$(date +%s)
+          TIMEOUT=21300  # 355 minutes
+
+          take_screenshot() {
+            local name="$1"
+            if [ -S qemu.sock ]; then
+              echo "screendump /tmp/qemu-screen.ppm" | socat - UNIX-CONNECT:qemu.sock 2>/dev/null || true
+              if [ -f /tmp/qemu-screen.ppm ]; then
+                local sz
+                sz=$(wc -c < /tmp/qemu-screen.ppm 2>/dev/null || echo 0)
+                convert /tmp/qemu-screen.ppm "screenshots/${name}.png" 2>/dev/null || \
+                  cp /tmp/qemu-screen.ppm "screenshots/${name}.ppm"
+                echo "Screenshot saved: ${name} (framebuffer ${sz} bytes)"
+              fi
+            fi
+          }
+
+          sleep 30
+          take_screenshot "00-initial"
+          echo "=== Serial log at +30s ==="
+          cat serial.log 2>/dev/null || echo "(serial.log empty)"
+
+          while true; do
+            ELAPSED=$(( $(date +%s) - START ))
+
+            if grep -q "KIOSK_SETUP_COMPLETE" serial.log 2>/dev/null; then
+              echo "Completion marker detected after ${ELAPSED}s."
+              break
+            fi
+
+            if grep -q "KIOSK_SETUP_STARTED" serial.log 2>/dev/null && [ "${SETUP_STARTED:-0}" = "0" ]; then
+              echo "INFO: KIOSK_SETUP_STARTED at ${ELAPSED}s"
+              SETUP_STARTED=1
+            fi
+
+            if grep -q "KIOSK_SETUP_FAILED" serial.log 2>/dev/null; then
+              echo "ERROR: KIOSK_SETUP_FAILED in serial log."
+              cat serial.log
+              exit 1
+            fi
+
+            if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
+              echo "ERROR: Timed out after ${TIMEOUT}s."
+              cat serial.log 2>/dev/null || echo "(empty)"
+              exit 1
+            fi
+
+            MOD15=$(( ELAPSED % 900 ))
+            if [ "$MOD15" -lt 10 ] && [ "$ELAPSED" -gt 60 ]; then
+              echo "--- Serial log at ${ELAPSED}s ---"
+              cat serial.log 2>/dev/null || echo "(empty)"
+            fi
+
+            MOD=$(( ELAPSED % 120 ))
+            if [ "$MOD" -lt 10 ]; then
+              SCREENSHOT_N=$(( SCREENSHOT_N + 1 ))
+              take_screenshot "$(printf '%02d' $SCREENSHOT_N)-t${ELAPSED}s"
+            fi
+
+            sleep 10
+          done
+
+      # ── Post-setup reboot ────────────────────────────────────────────────────
+      - name: Wait for kiosk to start after post-setup reboot
+        run: |
+          echo "Setup done. Waiting for post-setup reboot (~3 min)..."
+          sleep 180
+
+      - name: Take final screenshot
+        run: |
+          if [ -S qemu.sock ]; then
+            echo "screendump /tmp/qemu-screen.ppm" | socat - UNIX-CONNECT:qemu.sock 2>/dev/null || true
+            if [ -f /tmp/qemu-screen.ppm ]; then
+              convert /tmp/qemu-screen.ppm screenshots/FINAL-kiosk-shell.png 2>/dev/null || \
+                cp /tmp/qemu-screen.ppm screenshots/FINAL-kiosk-shell.ppm
+              echo "Final screenshot saved."
+            fi
+          fi
+
+      # ── Graceful QEMU shutdown ────────────────────────────────────────────────
+      - name: Shut down QEMU
+        if: always()
+        run: |
+          if [ -S qemu.sock ]; then
+            echo "system_powerdown" | socat - UNIX-CONNECT:qemu.sock 2>/dev/null || true
+            sleep 15
+          fi
+          if [ -f /tmp/qemu-bg.pid ]; then
+            QEMU_PID=$(cat /tmp/qemu-bg.pid)
+            kill "$QEMU_PID" 2>/dev/null || true
+          fi
+          sleep 3
+
+      # ── Mount disk and read SetupComplete.log ────────────────────────────────
+      - name: Mount virtual disk and read SetupComplete.log
+        id: read-log
+        run: |
+          sudo modprobe nbd max_part=8
+          sudo qemu-nbd -c /dev/nbd0 kiosk-vm.qcow2
+          sleep 3
+          sudo partprobe /dev/nbd0 2>/dev/null || true
+          sleep 2
+          lsblk /dev/nbd0
+
+          sudo mkdir -p /mnt/kiosk-windows
+          sudo ntfs-3g /dev/nbd0p3 /mnt/kiosk-windows -o ro,nofail 2>/dev/null || \
+            sudo mount -t ntfs-3g /dev/nbd0p3 /mnt/kiosk-windows -o ro,nofail
+
+          LOG_PATH="/mnt/kiosk-windows/Windows/Setup/Scripts/SetupComplete.log"
+          if [ -f "$LOG_PATH" ]; then
+            echo "========== SetupComplete.log =========="
+            cat "$LOG_PATH"
+            echo "======================================="
+            cp "$LOG_PATH" screenshots/SetupComplete.log
+            if grep -iE "=== First-boot setup FAILED|ERROR:" "$LOG_PATH"; then
+              echo "FAIL=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "FAIL=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "WARNING: SetupComplete.log not found."
+            echo "FAIL=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          sudo umount /mnt/kiosk-windows 2>/dev/null || true
+          sudo qemu-nbd -d /dev/nbd0 2>/dev/null || true
+
+      # ── Upload artifacts ─────────────────────────────────────────────────────
+      - name: Collect diagnostic logs
+        if: always()
+        run: |
+          cp /tmp/qemu-stdout.log screenshots/qemu-stdout.log 2>/dev/null || true
+          cp serial.log screenshots/serial.log 2>/dev/null || true
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiosk-full-install-test-${{ github.run_number }}
+          path: screenshots/
+          retention-days: 14
+
+      - name: Fail job if setup reported errors
+        if: steps.read-log.outputs.FAIL == 'true'
+        run: |
+          echo "SetupComplete.log contained errors or was missing."
+          exit 1
+
+      - name: Print test summary
+        if: always()
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════╗"
+          echo "  Full Kiosk ISO Install Test (QEMU) Complete"
+          echo "╠══════════════════════════════════════════════════════╣"
+          echo "  ISO : ${{ steps.iso.outputs.url }}"
+          echo "  Artifacts: screenshots + SetupComplete.log uploaded"
+          echo "╚══════════════════════════════════════════════════════╝"

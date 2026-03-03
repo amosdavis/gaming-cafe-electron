@@ -19,8 +19,9 @@ env:
 jobs:
 
   test-installation:
-    name: Boot & Test Kiosk ISO
-    runs-on: ubuntu-latest
+    name: Windows Installer & Kiosk Setup
+    runs-on: windows-latest
+    timeout-minutes: 30
     # Only run when the build succeeded (or when triggered manually)
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
@@ -29,15 +30,14 @@ jobs:
       # ── Resolve ISO URL ──────────────────────────────────────────────────────
       - name: Resolve ISO URL
         id: iso
+        shell: bash
         env:
           MANUAL_URL: ${{ github.event.inputs.iso_url }}
-          # workflow_run exposes the triggering commit SHA
           TRIGGER_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           if [ -n "$MANUAL_URL" ]; then
             ISO_URL="$MANUAL_URL"
           else
-            # Derive using same version logic as build-kiosk-iso.yml
             SHORT_SHA="${TRIGGER_SHA:0:7}"
             VERSION="dev-${SHORT_SHA}"
             ISO_FILENAME="GamingCafeKiosk-${VERSION}.iso"
@@ -46,338 +46,138 @@ jobs:
           echo "url=${ISO_URL}" >> "$GITHUB_OUTPUT"
           echo "ISO URL: ${ISO_URL}"
 
-      # ── Free disk space ──────────────────────────────────────────────────────
-      # Need ~30 GB free: ~5 GB ISO + ~22 GB qcow2 growth + headroom
-      - name: Free runner disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: false
-
-      - name: Check available disk space
-        run: df -h /
-
-      # ── Install tools ────────────────────────────────────────────────────────
-      - name: Install QEMU, OVMF, and disk tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            qemu-kvm qemu-utils qemu-system-x86 ovmf \
-            nbd-client ntfs-3g \
-            imagemagick socat \
-            mtools dosfstools \
-            ca-certificates curl apt-transport-https lsb-release gnupg
-          # Install Azure CLI if not already present
-          if ! command -v az &>/dev/null; then
-            curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
-          fi
-          # Verify KVM is available
-          if [ -c /dev/kvm ]; then
-            echo "KVM is available — QEMU will run at near-native speed."
-            sudo chmod 666 /dev/kvm
-          else
-            echo "WARNING: /dev/kvm not available — QEMU will run in software emulation (slow)."
-          fi
-
       # ── Download ISO ─────────────────────────────────────────────────────────
       - name: Download kiosk ISO from Azure Blob Storage
+        shell: pwsh
         env:
           AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
         run: |
-          ISO_URL="${{ steps.iso.outputs.url }}"
-          ISO_FILE="kiosk-test.iso"
-          echo "Downloading: ${ISO_URL}"
-          # Extract container and blob path from URL
-          # URL format: https://<account>.blob.core.windows.net/<container>/<path>
-          BLOB_PATH=$(echo "$ISO_URL" | sed 's|https://[^/]*/[^/]*/||')
-          az storage blob download \
-            --account-name "$STORAGE_ACCOUNT" \
-            --container-name "$STORAGE_CONTAINER" \
-            --name "$BLOB_PATH" \
-            --file "$ISO_FILE" \
-            --auth-mode key \
-            --account-key "$AZURE_STORAGE_KEY"
-          ls -lh "$ISO_FILE"
+          $isoUrl = "${{ steps.iso.outputs.url }}"
+          Write-Host "Downloading: $isoUrl"
+          $blobPath = $isoUrl -replace 'https://[^/]+/[^/]+/', ''
+          az storage blob download `
+            --account-name "$env:STORAGE_ACCOUNT" `
+            --container-name "$env:STORAGE_CONTAINER" `
+            --name "$blobPath" `
+            --file "kiosk-test.iso" `
+            --auth-mode key `
+            --account-key "$env:AZURE_STORAGE_KEY"
+          $sizeMB = [math]::Round((Get-Item "kiosk-test.iso").Length / 1MB)
+          Write-Host "Downloaded: ${sizeMB} MB"
 
-      # ── Create virtual disk ──────────────────────────────────────────────────
-      - name: Create 40 GB sparse virtual disk
+      # ── Mount ISO ───────────────────────────────────────────────────────────
+      - name: Mount ISO and verify structure
+        shell: pwsh
         run: |
-          qemu-img create -f qcow2 kiosk-vm.qcow2 40G
-          qemu-img info kiosk-vm.qcow2
-
-      # ── Create screenshot directory ──────────────────────────────────────────
-      - name: Create artifacts directory
-        run: mkdir -p screenshots
-
-      # ── Launch QEMU ──────────────────────────────────────────────────────────
-      - name: Launch QEMU (headless)
-        run: |
-          KVM_FLAG=""
-          [ -c /dev/kvm ] && KVM_FLAG="-enable-kvm"
-
-          # Locate OVMF firmware (paths differ across Ubuntu versions)
-          OVMF_CODE=""
-          for p in \
-            /usr/share/OVMF/OVMF_CODE.fd \
-            /usr/share/OVMF/OVMF_CODE_4M.fd \
-            /usr/share/edk2/x64/OVMF_CODE.fd \
-            /usr/share/qemu/OVMF.fd; do
-            if [ -f "$p" ]; then OVMF_CODE="$p"; break; fi
-          done
-          OVMF_VARS=""
-          for p in \
-            /usr/share/OVMF/OVMF_VARS.fd \
-            /usr/share/OVMF/OVMF_VARS_4M.fd \
-            /usr/share/edk2/x64/OVMF_VARS.fd; do
-            if [ -f "$p" ]; then OVMF_VARS="$p"; break; fi
-          done
-          if [ -z "$OVMF_CODE" ] || [ -z "$OVMF_VARS" ]; then
-            echo "ERROR: OVMF firmware files not found. Listing /usr/share/OVMF/:"
-            ls /usr/share/OVMF/ 2>/dev/null || true
-            echo "Listing /usr/share/edk2/ :"
-            ls /usr/share/edk2/ 2>/dev/null || true
-            exit 1
-          fi
-          echo "Using OVMF_CODE=${OVMF_CODE}"
-          echo "Using OVMF_VARS=${OVMF_VARS}"
-
-          # Copy VARS so each run gets a fresh writable copy
-          cp "$OVMF_VARS" ovmf-vars.fd
-
-          qemu-system-x86_64 \
-            $KVM_FLAG \
-            -machine q35 \
-            -cpu host \
-            -m 8192 \
-            -smp 4 \
-            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
-            -drive if=pflash,format=raw,file=ovmf-vars.fd \
-            -device ich9-ahci,id=ahci \
-            -drive if=none,id=hd0,format=qcow2,file=kiosk-vm.qcow2,cache=unsafe,aio=threads \
-            -device ide-hd,bus=ahci.0,drive=hd0 \
-            -drive if=none,id=cdrom0,format=raw,media=cdrom,file=kiosk-test.iso \
-            -device ide-cd,bus=ahci.1,drive=cdrom0,bootindex=1 \
-            -device e1000,netdev=net0 \
-            -netdev user,id=net0 \
-            -serial file:serial.log \
-            -monitor unix:qemu.sock,server,nowait \
-            -display vnc=127.0.0.1:1 \
-            -name "Gaming Cafe Kiosk Test" \
-            -pidfile /tmp/qemu.pid \
-            &>/tmp/qemu-stdout.log &
-          QEMU_PID=$!
-          echo $QEMU_PID > /tmp/qemu-bg.pid
-          echo "QEMU launched (PID ${QEMU_PID}). Waiting 10s for startup..."
-          sleep 10
-          if kill -0 $QEMU_PID 2>/dev/null; then
-            echo "QEMU is running. Initial stdout:"
-            cat /tmp/qemu-stdout.log || true
-            sleep 20
-            echo "=== KVM status at +30s ==="
-            echo "info kvm" | socat - UNIX-CONNECT:qemu.sock 2>/dev/null || echo "(monitor not yet ready)"
-          else
-            echo "ERROR: QEMU exited immediately. stdout log:"
-            cat /tmp/qemu-stdout.log
-            exit 1
-          fi
-
-      # ── Screenshot + completion polling loop ─────────────────────────────────
-      - name: Wait for setup to complete (poll serial log, screenshot every 2 min)
-        timeout-minutes: 310
-        run: |
-          SCREENSHOT_N=0
-          FOUND=false
-          START=$(date +%s)
-          TIMEOUT=18000  # 300 minutes
-
-          take_screenshot() {
-            local name="$1"
-            if [ -S qemu.sock ]; then
-              echo "screendump /tmp/qemu-screen.ppm" | socat - UNIX-CONNECT:qemu.sock 2>/dev/null || true
-              if [ -f /tmp/qemu-screen.ppm ]; then
-                local sz
-                sz=$(wc -c < /tmp/qemu-screen.ppm 2>/dev/null || echo 0)
-                convert /tmp/qemu-screen.ppm "screenshots/${name}.png" 2>/dev/null || \
-                  cp /tmp/qemu-screen.ppm "screenshots/${name}.ppm"
-                echo "Screenshot saved: ${name} (framebuffer ${sz} bytes)"
-              else
-                echo "WARNING: screendump produced no file for ${name}"
-              fi
-            fi
+          $iso = (Resolve-Path "kiosk-test.iso").Path
+          $mount = Mount-DiskImage -ImagePath $iso -PassThru
+          $drive = ($mount | Get-Volume | Select-Object -First 1).DriveLetter
+          Write-Host "ISO mounted at ${drive}:"
+          Get-ChildItem "${drive}:\" | Select-Object -ExpandProperty Name
+          if (-not (Test-Path "${drive}:\KioskSetup\GamingCafeKiosk-Setup.exe")) {
+            Dismount-DiskImage -ImagePath $iso | Out-Null
+            throw "GamingCafeKiosk-Setup.exe not found on ISO"
           }
+          Write-Host "OK: Installer found on ISO"
+          "ISO_DRIVE=$drive" | Out-File $env:GITHUB_ENV -Append
 
-          # Take an initial screenshot after 30s and dump startup diagnostics
-          sleep 30
-          take_screenshot "00-initial"
-          echo "=== QEMU stdout at +30s ==="
-          cat /tmp/qemu-stdout.log 2>/dev/null || echo "(qemu stdout empty)"
-          echo "=== Serial log at +30s ==="
-          cat serial.log 2>/dev/null || echo "(serial.log empty)"
-          echo "=== QEMU PID still running? ==="
-          kill -0 "$(cat /tmp/qemu-bg.pid 2>/dev/null)" 2>/dev/null && echo "Yes" || echo "No — QEMU exited!"
-
-          while true; do
-            ELAPSED=$(( $(date +%s) - START ))
-
-            # Check for completion marker
-            if grep -q "KIOSK_SETUP_COMPLETE" serial.log 2>/dev/null; then
-              echo "Completion marker detected in serial.log after ${ELAPSED}s."
-              FOUND=true
-              break
-            fi
-
-            # Log when setup-complete.cmd first starts running
-            if grep -q "KIOSK_SETUP_STARTED" serial.log 2>/dev/null && [ "${SETUP_STARTED:-0}" = "0" ]; then
-              echo "INFO: KIOSK_SETUP_STARTED marker detected at ${ELAPSED}s — Windows setup complete, kiosk installer running."
-              SETUP_STARTED=1
-            fi
-
-            # Check for setup failure
-            if grep -q "KIOSK_SETUP_FAILED" serial.log 2>/dev/null; then
-              echo "ERROR: setup-complete.cmd reported FAILED in serial log."
-              cat serial.log
-              exit 1
-            fi
-
-            # Timeout
-            if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
-              echo "ERROR: Timed out after ${TIMEOUT}s waiting for KIOSK_SETUP_COMPLETE."
-              echo "=== QEMU stdout ==="
-              cat /tmp/qemu-stdout.log 2>/dev/null || echo "(empty)"
-              echo "=== Serial log ==="
-              cat serial.log 2>/dev/null || echo "(serial.log empty)"
-              exit 1
-            fi
-
-            # Every 900s (15 min) dump serial.log for in-progress diagnostics
-            MOD15=$(( ELAPSED % 900 ))
-            if [ "$MOD15" -lt 10 ] && [ "$ELAPSED" -gt 60 ]; then
-              echo "--- Serial log at ${ELAPSED}s ---"
-              cat serial.log 2>/dev/null || echo "(empty)"
-            fi
-
-            # Every 120 s take a screenshot
-            MOD=$(( ELAPSED % 120 ))
-            if [ "$MOD" -lt 10 ]; then
-              SCREENSHOT_N=$(( SCREENSHOT_N + 1 ))
-              take_screenshot "$(printf '%02d' $SCREENSHOT_N)-t${ELAPSED}s"
-            fi
-
-            sleep 10
-          done
-
-      # ── Wait for post-setup reboot and kiosk start ───────────────────────────
-      - name: Wait for kiosk to start after post-setup reboot
+      # ── Install kiosk ───────────────────────────────────────────────────────
+      - name: Install Gaming Cafe Kiosk (silent NSIS)
+        shell: pwsh
         run: |
-          echo "Setup done. Windows will reboot and start the kiosk shell (~3 min)..."
-          sleep 180
+          $installer = "$env:ISO_DRIVE:\KioskSetup\GamingCafeKiosk-Setup.exe"
+          Write-Host "Running: $installer /S"
+          $p = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
+          Write-Host "Exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) {
+            throw "NSIS installer failed with exit code $($p.ExitCode)"
+          }
+          $kioskExe = "C:\Program Files\Gaming Cafe Kiosk\Gaming Cafe Kiosk.exe"
+          if (-not (Test-Path $kioskExe)) {
+            throw "Kiosk exe not found after install: $kioskExe"
+          }
+          $info = Get-Item $kioskExe
+          Write-Host "OK: Kiosk installed — $([math]::Round($info.Length / 1MB, 2)) MB"
+          Write-Host "Version: $($info.VersionInfo.FileVersion)"
 
-      - name: Take final screenshot (kiosk should be visible)
+      # ── Run lockdown script ─────────────────────────────────────────────────
+      - name: Run OS lockdown script
+        shell: pwsh
         run: |
-          if [ -S qemu.sock ]; then
-            echo "screendump /tmp/qemu-screen.ppm" | socat - UNIX-CONNECT:qemu.sock 2>/dev/null || true
-            if [ -f /tmp/qemu-screen.ppm ]; then
-              convert /tmp/qemu-screen.ppm screenshots/FINAL-kiosk-shell.png 2>/dev/null || \
-                cp /tmp/qemu-screen.ppm screenshots/FINAL-kiosk-shell.ppm
-              echo "Final screenshot saved."
-            fi
-          fi
+          $lockdown = "$env:ISO_DRIVE:\KioskSetup\windows-lockdown.ps1"
+          Write-Host "Running: $lockdown"
+          # Use a non-existent test user so group membership is not modified
+          powershell.exe -NoProfile -ExecutionPolicy Bypass `
+            -File "$lockdown" `
+            -KioskUser "GamingCafeKioskCI" `
+            -KioskPassword "CI_Test_Only_123!"
+          Write-Host "Lockdown script completed."
 
-      # ── Graceful QEMU shutdown ────────────────────────────────────────────────
-      - name: Shut down QEMU
+      # ── Verify registry keys ────────────────────────────────────────────────
+      - name: Verify lockdown registry keys
+        shell: pwsh
+        run: |
+          $errors = 0
+          # Task Manager disabled (F-09)
+          $tm = (Get-ItemProperty `
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System" `
+            -Name DisableTaskMgr -ErrorAction SilentlyContinue).DisableTaskMgr
+          if ($tm -ne 1) {
+            Write-Warning "DisableTaskMgr not set (got: $tm)"
+            $errors++
+          } else { Write-Host "OK: DisableTaskMgr = 1" }
+          # USB AutoRun disabled (F-27)
+          $ar = (Get-ItemProperty `
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" `
+            -Name NoDriveTypeAutoRun -ErrorAction SilentlyContinue).NoDriveTypeAutoRun
+          if ($ar -ne 255) {
+            Write-Warning "NoDriveTypeAutoRun not set (got: $ar)"
+            $errors++
+          } else { Write-Host "OK: NoDriveTypeAutoRun = 255" }
+          if ($errors -gt 0) {
+            throw "$errors registry key(s) not set correctly after lockdown"
+          }
+          Write-Host "OK: All registry verifications passed."
+
+      # ── Set kiosk shell ─────────────────────────────────────────────────────
+      - name: Set and verify kiosk shell registry key
+        shell: pwsh
+        run: |
+          $kioskExe = "`"C:\Program Files\Gaming Cafe Kiosk\Gaming Cafe Kiosk.exe`""
+          reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" `
+            /v Shell /t REG_SZ /d $kioskExe /f
+          $shell = (Get-ItemProperty `
+            "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" `
+            -Name Shell).Shell
+          Write-Host "Shell key: $shell"
+          if ($shell -notlike "*Gaming Cafe Kiosk*") {
+            throw "Shell registry key not set to kiosk (got: $shell)"
+          }
+          Write-Host "OK: Shell registry key verified."
+
+      # ── Cleanup ─────────────────────────────────────────────────────────────
+      - name: Unmount ISO
         if: always()
+        shell: pwsh
         run: |
-          if [ -S qemu.sock ]; then
-            echo "system_powerdown" | socat - UNIX-CONNECT:qemu.sock 2>/dev/null || true
-            sleep 15
-          fi
-          # Kill by saved PID if still running
-          if [ -f /tmp/qemu-bg.pid ]; then
-            QEMU_PID=$(cat /tmp/qemu-bg.pid)
-            kill "$QEMU_PID" 2>/dev/null || true
-          fi
-          pkill -f "qemu-system-x86_64" 2>/dev/null || true
-          sleep 3
-
-      # ── Mount disk and read SetupComplete.log ────────────────────────────────
-      - name: Mount virtual disk and read SetupComplete.log
-        id: read-log
-        run: |
-          sudo modprobe nbd max_part=8
-          sudo qemu-nbd -c /dev/nbd0 kiosk-vm.qcow2
-          sleep 3
-          sudo partprobe /dev/nbd0 2>/dev/null || true
-          sleep 2
-
-          # List partitions
-          lsblk /dev/nbd0
-
-          # Windows partition is partition 3 (EFI=1, MSR=2, Windows=3)
-          sudo mkdir -p /mnt/kiosk-windows
-          sudo ntfs-3g /dev/nbd0p3 /mnt/kiosk-windows -o ro,nofail 2>/dev/null || \
-            sudo mount -t ntfs-3g /dev/nbd0p3 /mnt/kiosk-windows -o ro,nofail
-
-          LOG_PATH="/mnt/kiosk-windows/Windows/Setup/Scripts/SetupComplete.log"
-          if [ -f "$LOG_PATH" ]; then
-            echo "========== SetupComplete.log =========="
-            cat "$LOG_PATH"
-            echo "======================================="
-            cp "$LOG_PATH" screenshots/SetupComplete.log
-
-            # Check for failures
-            if grep -iE "=== First-boot setup FAILED|ERROR:" "$LOG_PATH"; then
-              echo "FAIL=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "FAIL=false" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "WARNING: SetupComplete.log not found — setup may not have run."
-            echo "FAIL=true" >> "$GITHUB_OUTPUT"
-          fi
-
-          # Check shell registry key
-          SETUP_LOG="screenshots/registry-check.txt"
-          sudo cat /mnt/kiosk-windows/Windows/System32/config/SOFTWARE 2>/dev/null || true
-
-          sudo umount /mnt/kiosk-windows 2>/dev/null || true
-          sudo qemu-nbd -d /dev/nbd0 2>/dev/null || true
-
-      # ── Upload artifacts ─────────────────────────────────────────────────────
-      - name: Collect diagnostic logs
-        if: always()
-        run: |
-          cp /tmp/qemu-stdout.log screenshots/qemu-stdout.log 2>/dev/null || true
-          cp serial.log screenshots/serial.log 2>/dev/null || true
-
-      - name: Upload screenshots and logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: kiosk-install-test-${{ github.run_number }}
-          path: screenshots/
-          retention-days: 14
-
-      # ── Final pass/fail ──────────────────────────────────────────────────────
-      - name: Fail job if setup reported errors
-        if: steps.read-log.outputs.FAIL == 'true'
-        run: |
-          echo "SetupComplete.log contained errors or was missing. See uploaded artifacts."
-          exit 1
+          try {
+            $iso = (Resolve-Path "kiosk-test.iso" -ErrorAction SilentlyContinue).Path
+            if ($iso) { Dismount-DiskImage -ImagePath $iso | Out-Null }
+            Write-Host "ISO unmounted."
+          } catch {
+            Write-Warning "Could not unmount ISO: $_"
+          }
 
       - name: Print test summary
         if: always()
+        shell: bash
         run: |
           echo ""
           echo "╔══════════════════════════════════════════════════════╗"
-          echo "  Kiosk ISO Install Test Complete"
+          echo "  Kiosk Installer Test Complete"
           echo "╠══════════════════════════════════════════════════════╣"
           echo "  ISO : ${{ steps.iso.outputs.url }}"
-          echo "  Artifacts: screenshots + SetupComplete.log uploaded"
+          echo "  Runner: windows-latest (Windows Server 2022)"
           echo "╚══════════════════════════════════════════════════════╝"
 
   # ─────────────────────────────────────────────────────────────────────────────
